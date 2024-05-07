@@ -42,20 +42,20 @@ var (
 	errBlockInterruptedByTimeout  = errors.New("timeout while building block")
 )
 
-// environment is the worker's current environment and holds all
+// Environment is the worker's current Environment and holds all
 // information of the sealing block generation.
-type environment struct {
-	signer   types.Signer
-	state    *state.StateDB // apply state changes here
-	tcount   int            // tx count in cycle
-	gasPool  *core.GasPool  // available gas used to pack transactions
-	coinbase common.Address
+type Environment struct {
+	Signer   types.Signer
+	State    *state.StateDB // apply state changes here
+	Tcount   int            // tx count in cycle
+	GasPool  *core.GasPool  // available gas used to pack transactions
+	Coinbase common.Address
 
-	header   *types.Header
-	txs      []*types.Transaction
-	receipts []*types.Receipt
-	sidecars []*types.BlobTxSidecar
-	blobs    int
+	Header   *types.Header
+	Txs      []*types.Transaction
+	Receipts []*types.Receipt
+	Sidecars []*types.BlobTxSidecar
+	Blobs    int
 }
 
 const (
@@ -105,24 +105,24 @@ func (miner *Miner) generateWork(params *generateParams) *newPayloadResult {
 			log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(miner.config.Recommit))
 		}
 	}
-	body := types.Body{Transactions: work.txs, Withdrawals: params.withdrawals}
-	block, err := miner.engine.FinalizeAndAssemble(miner.chain, work.header, work.state, &body, work.receipts)
+	body := types.Body{Transactions: work.Txs, Withdrawals: params.withdrawals}
+	block, err := miner.engine.FinalizeAndAssemble(miner.chain, work.Header, work.State, &body, work.Receipts)
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
 	return &newPayloadResult{
 		block:    block,
-		fees:     totalFees(block, work.receipts),
-		sidecars: work.sidecars,
-		stateDB:  work.state,
-		receipts: work.receipts,
+		fees:     totalFees(block, work.Receipts),
+		sidecars: work.Sidecars,
+		stateDB:  work.State,
+		receipts: work.Receipts,
 	}
 }
 
 // prepareWork constructs the sealing task according to the given parameters,
 // either based on the last chain head or specified parent. In this function
 // the pending transactions are not filled yet, only the empty task returned.
-func (miner *Miner) prepareWork(genParams *generateParams) (*environment, error) {
+func (miner *Miner) prepareWork(genParams *generateParams) (*Environment, error) {
 	miner.confMu.RLock()
 	defer miner.confMu.RUnlock()
 
@@ -197,14 +197,14 @@ func (miner *Miner) prepareWork(genParams *generateParams) (*environment, error)
 	}
 	if header.ParentBeaconRoot != nil {
 		context := core.NewEVMBlockContext(header, miner.chain, nil)
-		vmenv := vm.NewEVM(context, vm.TxContext{}, env.state, miner.chainConfig, vm.Config{})
-		core.ProcessBeaconBlockRoot(*header.ParentBeaconRoot, vmenv, env.state)
+		vmenv := vm.NewEVM(context, vm.TxContext{}, env.State, miner.chainConfig, vm.Config{})
+		core.ProcessBeaconBlockRoot(*header.ParentBeaconRoot, vmenv, env.State)
 	}
 	return env, nil
 }
 
 // makeEnv creates a new environment for the sealing block.
-func (miner *Miner) makeEnv(parent *types.Header, header *types.Header, coinbase common.Address) (*environment, error) {
+func (miner *Miner) makeEnv(parent *types.Header, header *types.Header, coinbase common.Address) (*Environment, error) {
 	// Retrieve the parent state to execute on top and start a prefetcher for
 	// the miner to speed block sealing up a bit.
 	state, err := miner.chain.StateAt(parent.Root)
@@ -212,15 +212,15 @@ func (miner *Miner) makeEnv(parent *types.Header, header *types.Header, coinbase
 		return nil, err
 	}
 	// Note the passed coinbase may be different with header.Coinbase.
-	return &environment{
-		signer:   types.MakeSigner(miner.chainConfig, header.Number, header.Time),
-		state:    state,
-		coinbase: coinbase,
-		header:   header,
+	return &Environment{
+		Signer:   types.MakeSigner(miner.chainConfig, header.Number, header.Time),
+		State:    state,
+		Coinbase: coinbase,
+		Header:   header,
 	}, nil
 }
 
-func (miner *Miner) commitTransaction(env *environment, tx *types.Transaction) error {
+func (miner *Miner) commitTransaction(env *Environment, tx *types.Transaction) error {
 	if tx.Type() == types.BlobTxType {
 		return miner.commitBlobTransaction(env, tx)
 	}
@@ -228,13 +228,13 @@ func (miner *Miner) commitTransaction(env *environment, tx *types.Transaction) e
 	if err != nil {
 		return err
 	}
-	env.txs = append(env.txs, tx)
-	env.receipts = append(env.receipts, receipt)
-	env.tcount++
+	env.Txs = append(env.Txs, tx)
+	env.Receipts = append(env.Receipts, receipt)
+	env.Tcount++
 	return nil
 }
 
-func (miner *Miner) commitBlobTransaction(env *environment, tx *types.Transaction) error {
+func (miner *Miner) commitBlobTransaction(env *Environment, tx *types.Transaction) error {
 	sc := tx.BlobTxSidecar()
 	if sc == nil {
 		panic("blob transaction without blobs in miner")
@@ -243,40 +243,40 @@ func (miner *Miner) commitBlobTransaction(env *environment, tx *types.Transactio
 	// isn't really a better place right now. The blob gas limit is checked at block validation time
 	// and not during execution. This means core.ApplyTransaction will not return an error if the
 	// tx has too many blobs. So we have to explicitly check it here.
-	if (env.blobs+len(sc.Blobs))*params.BlobTxBlobGasPerBlob > params.MaxBlobGasPerBlock {
+	if (env.Blobs+len(sc.Blobs))*params.BlobTxBlobGasPerBlob > params.MaxBlobGasPerBlock {
 		return errors.New("max data blobs reached")
 	}
 	receipt, err := miner.applyTransaction(env, tx)
 	if err != nil {
 		return err
 	}
-	env.txs = append(env.txs, tx.WithoutBlobTxSidecar())
-	env.receipts = append(env.receipts, receipt)
-	env.sidecars = append(env.sidecars, sc)
-	env.blobs += len(sc.Blobs)
-	*env.header.BlobGasUsed += receipt.BlobGasUsed
-	env.tcount++
+	env.Txs = append(env.Txs, tx.WithoutBlobTxSidecar())
+	env.Receipts = append(env.Receipts, receipt)
+	env.Sidecars = append(env.Sidecars, sc)
+	env.Blobs += len(sc.Blobs)
+	*env.Header.BlobGasUsed += receipt.BlobGasUsed
+	env.Tcount++
 	return nil
 }
 
 // applyTransaction runs the transaction. If execution fails, state and gas pool are reverted.
-func (miner *Miner) applyTransaction(env *environment, tx *types.Transaction) (*types.Receipt, error) {
+func (miner *Miner) applyTransaction(env *Environment, tx *types.Transaction) (*types.Receipt, error) {
 	var (
-		snap = env.state.Snapshot()
-		gp   = env.gasPool.Gas()
+		snap = env.State.Snapshot()
+		gp   = env.GasPool.Gas()
 	)
-	receipt, err := core.ApplyTransaction(miner.chainConfig, miner.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, vm.Config{})
+	receipt, err := core.ApplyTransaction(miner.chainConfig, miner.chain, &env.Coinbase, env.GasPool, env.State, env.Header, tx, &env.Header.GasUsed, vm.Config{})
 	if err != nil {
-		env.state.RevertToSnapshot(snap)
-		env.gasPool.SetGas(gp)
+		env.State.RevertToSnapshot(snap)
+		env.GasPool.SetGas(gp)
 	}
 	return receipt, err
 }
 
-func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *transactionsByPriceAndNonce, interrupt *atomic.Int32) error {
-	gasLimit := env.header.GasLimit
-	if env.gasPool == nil {
-		env.gasPool = new(core.GasPool).AddGas(gasLimit)
+func (miner *Miner) commitTransactions(env *Environment, plainTxs, blobTxs *transactionsByPriceAndNonce, interrupt *atomic.Int32) error {
+	gasLimit := env.Header.GasLimit
+	if env.GasPool == nil {
+		env.GasPool = new(core.GasPool).AddGas(gasLimit)
 	}
 	for {
 		// Check interruption signal and abort building if it's fired.
@@ -286,13 +286,13 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 			}
 		}
 		// If we don't have enough gas for any further transactions then we're done.
-		if env.gasPool.Gas() < params.TxGas {
-			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas)
+		if env.GasPool.Gas() < params.TxGas {
+			log.Trace("Not enough gas for further transactions", "have", env.GasPool, "want", params.TxGas)
 			break
 		}
 		// If we don't have enough blob space for any further blob transactions,
 		// skip that list altogether
-		if !blobTxs.Empty() && env.blobs*params.BlobTxBlobGasPerBlob >= params.MaxBlobGasPerBlock {
+		if !blobTxs.Empty() && env.Blobs*params.BlobTxBlobGasPerBlob >= params.MaxBlobGasPerBlock {
 			log.Trace("Not enough blob space for further blob transactions")
 			blobTxs.Clear()
 			// Fall though to pick up any plain txs
@@ -321,12 +321,12 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 			break
 		}
 		// If we don't have enough space for the next transaction, skip the account.
-		if env.gasPool.Gas() < ltx.Gas {
-			log.Trace("Not enough gas left for transaction", "hash", ltx.Hash, "left", env.gasPool.Gas(), "needed", ltx.Gas)
+		if env.GasPool.Gas() < ltx.Gas {
+			log.Trace("Not enough gas left for transaction", "hash", ltx.Hash, "left", env.GasPool.Gas(), "needed", ltx.Gas)
 			txs.Pop()
 			continue
 		}
-		if left := uint64(params.MaxBlobGasPerBlock - env.blobs*params.BlobTxBlobGasPerBlob); left < ltx.BlobGas {
+		if left := uint64(params.MaxBlobGasPerBlock - env.Blobs*params.BlobTxBlobGasPerBlob); left < ltx.BlobGas {
 			log.Trace("Not enough blob gas left for transaction", "hash", ltx.Hash, "left", left, "needed", ltx.BlobGas)
 			txs.Pop()
 			continue
@@ -340,17 +340,17 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 		}
 		// Error may be ignored here. The error has already been checked
 		// during transaction acceptance in the transaction pool.
-		from, _ := types.Sender(env.signer, tx)
+		from, _ := types.Sender(env.Signer, tx)
 
 		// Check whether the tx is replay protected. If we're not in the EIP155 hf
 		// phase, start ignoring the sender until we do.
-		if tx.Protected() && !miner.chainConfig.IsEIP155(env.header.Number) {
+		if tx.Protected() && !miner.chainConfig.IsEIP155(env.Header.Number) {
 			log.Trace("Ignoring replay protected transaction", "hash", ltx.Hash, "eip155", miner.chainConfig.EIP155Block)
 			txs.Pop()
 			continue
 		}
 		// Start executing the transaction
-		env.state.SetTxContext(tx.Hash(), env.tcount)
+		env.State.SetTxContext(tx.Hash(), env.Tcount)
 
 		err := miner.commitTransaction(env, tx)
 		switch {
@@ -376,7 +376,7 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 // fillTransactions retrieves the pending transactions from the txpool and fills them
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
-func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) error {
+func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *Environment) error {
 	miner.confMu.RLock()
 	tip := miner.config.GasPrice
 	miner.confMu.RUnlock()
@@ -385,11 +385,11 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 	filter := txpool.PendingFilter{
 		MinTip: uint256.MustFromBig(tip),
 	}
-	if env.header.BaseFee != nil {
-		filter.BaseFee = uint256.MustFromBig(env.header.BaseFee)
+	if env.Header.BaseFee != nil {
+		filter.BaseFee = uint256.MustFromBig(env.Header.BaseFee)
 	}
-	if env.header.ExcessBlobGas != nil {
-		filter.BlobFee = uint256.MustFromBig(eip4844.CalcBlobFee(*env.header.ExcessBlobGas))
+	if env.Header.ExcessBlobGas != nil {
+		filter.BlobFee = uint256.MustFromBig(eip4844.CalcBlobFee(*env.Header.ExcessBlobGas))
 	}
 	filter.OnlyPlainTxs, filter.OnlyBlobTxs = true, false
 	pendingPlainTxs := miner.txpool.Pending(filter)
@@ -413,16 +413,16 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 	}
 	// Fill the block with all available pending transactions.
 	if len(localPlainTxs) > 0 || len(localBlobTxs) > 0 {
-		plainTxs := newTransactionsByPriceAndNonce(env.signer, localPlainTxs, env.header.BaseFee)
-		blobTxs := newTransactionsByPriceAndNonce(env.signer, localBlobTxs, env.header.BaseFee)
+		plainTxs := newTransactionsByPriceAndNonce(env.Signer, localPlainTxs, env.Header.BaseFee)
+		blobTxs := newTransactionsByPriceAndNonce(env.Signer, localBlobTxs, env.Header.BaseFee)
 
 		if err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
 			return err
 		}
 	}
 	if len(remotePlainTxs) > 0 || len(remoteBlobTxs) > 0 {
-		plainTxs := newTransactionsByPriceAndNonce(env.signer, remotePlainTxs, env.header.BaseFee)
-		blobTxs := newTransactionsByPriceAndNonce(env.signer, remoteBlobTxs, env.header.BaseFee)
+		plainTxs := newTransactionsByPriceAndNonce(env.Signer, remotePlainTxs, env.Header.BaseFee)
+		blobTxs := newTransactionsByPriceAndNonce(env.Signer, remoteBlobTxs, env.Header.BaseFee)
 
 		if err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
 			return err
