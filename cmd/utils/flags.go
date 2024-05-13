@@ -191,6 +191,11 @@ var (
 		Usage:    "Exits after block synchronisation completes",
 		Category: flags.EthCategory,
 	}
+	ClientModeFlag = &cli.BoolFlag{
+		Name:     "clientmode",
+		Usage:    "Activates client mode",
+		Category: flags.APICategory,
+	}
 
 	// Dump command options.
 	IterativeOutputFlag = &cli.BoolFlag{
