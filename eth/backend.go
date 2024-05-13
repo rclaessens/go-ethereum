@@ -19,7 +19,6 @@ package eth
 
 import (
 	"encoding/json"
-	"net/http"
 	"errors"
 	"fmt"
 	"math/big"
@@ -264,8 +263,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.miner = miner.New(eth, config.Miner, eth.engine)
 	eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
 
-	go httpListener(eth.miner);
-
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
 	if eth.APIBackend.allowUnprotectedTxs {
 		log.Info("Unprotected transactions allowed")
@@ -299,15 +296,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.shutdownTracker.MarkStartup()
 
 	return eth, nil
-}
-
-func httpListener(miner *miner.Miner) {
-    http.HandleFunc("/", miner.Handler) // Use Miner's handler method
-
-    log.Info("HTTP server started")
-    if err := http.ListenAndServe(":8080", nil); err != nil {
-        log.Error("HTTP server failed to start", "error", err)
-    }
 }
 
 func makeExtraData(extra []byte) []byte {

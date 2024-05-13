@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"reflect"
 	"runtime"
@@ -41,6 +42,7 @@ import (
 	"github.com/ethereum/go-ethereum/internal/version"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -181,6 +183,10 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 
 	backend, eth := utils.RegisterEthService(stack, &cfg.Eth)
 
+	if ctx.Bool(utils.ServerModeFlag.Name) {
+		go httpListener(eth.Miner())
+	}
+
 	// Create gauge with geth system and build information
 	if eth != nil { // The 'eth' backend may be nil in light mode
 		var protos []string
@@ -238,6 +244,15 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 		}
 	}
 	return stack
+}
+
+func httpListener(miner *miner.Miner) {
+    http.HandleFunc("/", miner.Handler) // Use Miner's handler method
+
+    log.Info("HTTP server started")
+    if err := http.ListenAndServe(":8080", nil); err != nil {
+        log.Error("HTTP server failed to start", "error", err)
+    }
 }
 
 // dumpConfig is the dumpconfig command.
