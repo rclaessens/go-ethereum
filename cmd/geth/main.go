@@ -156,6 +156,7 @@ var (
 		utils.BeaconGenesisRootFlag,
 		utils.BeaconGenesisTimeFlag,
 		utils.BeaconCheckpointFlag,
+		utils.ServerModeFlag,
 		utils.ClientModeFlag,
 	}, utils.NetworkFlags, utils.DatabaseFlags)
 

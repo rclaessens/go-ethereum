@@ -197,6 +197,12 @@ var (
 		Category: flags.APICategory,
 	}
 
+	ServerModeFlag = &cli.BoolFlag{
+		Name: 	   "servermode",
+		Usage:     "Enable server mode and start HTTP listener",
+		Category:  flags.APICategory,
+	}
+
 	// Dump command options.
 	IterativeOutputFlag = &cli.BoolFlag{
 		Name:  "iterative",
