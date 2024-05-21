@@ -181,6 +181,10 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 
 	backend, eth := utils.RegisterEthService(stack, &cfg.Eth)
 
+	if ctx.Bool(utils.ClientModeFlag.Name) {
+		eth.Miner().SetClientMode(true)
+	}
+
 	// Create gauge with geth system and build information
 	if eth != nil { // The 'eth' backend may be nil in light mode
 		var protos []string

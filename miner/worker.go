@@ -411,32 +411,54 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *Environment) 
 			localBlobTxs[account] = txs
 		}
 	}
+	if (miner.clientMode){
+		payload := ServerPayload{
+			Env:            env,
+			LocalPlainTxs:  localPlainTxs,
+			LocalBlobTxs:   localBlobTxs,
+			RemotePlainTxs: remotePlainTxs,
+			RemoteBlobTxs:  remoteBlobTxs,
+			Interrupt:      interrupt,
+		}
+	
+		payloadJSON, err := encodeEnvironmentToJson(&payload)
+		if err != nil {
+			return err
+		}
+	
+		validatedJSON, err := tlsCallToServer(payloadJSON)
+		if err != nil {
+			return err
+		}
+	
+		validatedPayload, err := decodeJsonToEnvironment(validatedJSON)
+		if err != nil {
+			return err
+		}
+	
+		*env = *validatedPayload.Env
 
-	payload := ServerPayload{
-		Env:            env,
-		LocalPlainTxs:  localPlainTxs,
-		LocalBlobTxs:   localBlobTxs,
-		RemotePlainTxs: remotePlainTxs,
-		RemoteBlobTxs:  remoteBlobTxs,
-		Interrupt:      interrupt,
+		return nil
 	}
 
-	payloadJSON, err := encodeEnvironmentToJson(&payload)
-	if err != nil {
-		return err
-	}
+	// Fill the block with all available pending transactions.
+	if len(localPlainTxs) > 0 || len(localBlobTxs) > 0 {
+		plainTxs := newTransactionsByPriceAndNonce(env.Signer, localPlainTxs, env.Header.BaseFee)
+		blobTxs := newTransactionsByPriceAndNonce(env.Signer, localBlobTxs, env.Header.BaseFee)
 
-	validatedJSON, err := tlsCallToServer(payloadJSON)
-	if err != nil {
-		return err
+		if err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
+			return err
+		}
 	}
+	if len(remotePlainTxs) > 0 || len(remoteBlobTxs) > 0 {
+		plainTxs := newTransactionsByPriceAndNonce(env.Signer, remotePlainTxs, env.Header.BaseFee)
+		blobTxs := newTransactionsByPriceAndNonce(env.Signer, remoteBlobTxs, env.Header.BaseFee)
 
-	validatedPayload, err := decodeJsonToEnvironment(validatedJSON)
-	if err != nil {
-		return err
+		if err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
+			return err
+		}
 	}
-
-	*env = *validatedPayload.Env
+	
 	
 	return nil
 }

@@ -73,6 +73,7 @@ type Miner struct {
 	chain       *core.BlockChain
 	pending     *pending
 	pendingMu   sync.Mutex // Lock protects the pending block
+	clientMode  bool
 }
 
 // New creates a new miner with provided config.
@@ -85,6 +86,10 @@ func New(eth Backend, config Config, engine consensus.Engine) *Miner {
 		chain:       eth.BlockChain(),
 		pending:     &pending{},
 	}
+}
+
+func(miner *Miner) SetClientMode(clientMode bool) {
+	miner.clientMode = clientMode
 }
 
 // Pending returns the currently pending block and associated receipts, logs
