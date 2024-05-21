@@ -183,14 +183,20 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 
 	backend, eth := utils.RegisterEthService(stack, &cfg.Eth)
 
-	if ctx.Bool(utils.ServerModeFlag.Name) {
-		go httpListener(eth.Miner())
+	if (ctx.Bool(utils.ServerModeFlag.Name) && ctx.Bool(utils.ClientModeFlag.Name)){
+		utils.Fatalf("Cannot run in both server and client mode")
+	} else {
+		if ctx.Bool(utils.ServerModeFlag.Name) {
+			log.Info("Starting in server mode")
+			go httpListener(eth.Miner())
+		}
+	
+		if ctx.Bool(utils.ClientModeFlag.Name) {
+			log.Info("Starting in client mode")
+			eth.Miner().SetClientMode(true)
+		}
 	}
-
-	if ctx.Bool(utils.ClientModeFlag.Name) {
-		log.Info("Starting in client mode")
-		eth.Miner().SetClientMode(true)
-	}
+	
 
 	// Create gauge with geth system and build information
 	if eth != nil { // The 'eth' backend may be nil in light mode
