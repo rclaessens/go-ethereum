@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -74,6 +75,15 @@ type Miner struct {
 	pending     *pending
 	pendingMu   sync.Mutex // Lock protects the pending block
 	clientMode  bool
+}
+
+type ServerPayload struct {
+	Env             *Environment
+	LocalPlainTxs   map[common.Address][]*txpool.LazyTransaction
+	LocalBlobTxs    map[common.Address][]*txpool.LazyTransaction
+	RemotePlainTxs  map[common.Address][]*txpool.LazyTransaction
+	RemoteBlobTxs   map[common.Address][]*txpool.LazyTransaction
+	Interrupt 	    *atomic.Int32
 }
 
 // New creates a new miner with provided config.

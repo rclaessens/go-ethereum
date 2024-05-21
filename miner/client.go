@@ -6,20 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"sync/atomic"
-
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/txpool"
 )
-
-type ServerPayload struct {
-	Env             *Environment
-	LocalPlainTxs   map[common.Address][]*txpool.LazyTransaction
-	LocalBlobTxs    map[common.Address][]*txpool.LazyTransaction
-	RemotePlainTxs  map[common.Address][]*txpool.LazyTransaction
-	RemoteBlobTxs   map[common.Address][]*txpool.LazyTransaction
-	Interrupt 	    *atomic.Int32
-}
 
 // encodeEnvironmentToJson converts the Environment struct to a JSON string.
 func encodeEnvironmentToJson(payload *ServerPayload) (string, error) {
