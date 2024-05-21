@@ -182,6 +182,7 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 	backend, eth := utils.RegisterEthService(stack, &cfg.Eth)
 
 	if ctx.Bool(utils.ClientModeFlag.Name) {
+		log.Info("Starting in client mode")
 		eth.Miner().SetClientMode(true)
 	}
 
