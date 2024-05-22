@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/ethereum/go-ethereum/log"
 )
 
 func decodeFromJSON (jsonData string) (*ServerPayload, error){
@@ -30,6 +32,7 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	log.Info("Received request from client")
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -39,7 +42,8 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 
 	payload, err := decodeFromJSON(string(body))
 	if err != nil {
-		http.Error(w, "Failed to decode JSON", http.StatusBadRequest)
+		log.Error("Failed to decode JSON", "err", err)
+		http.Error(w, "Failed to decode JSON", http.StatusBadRequest) // TO DO : because it fails
 		return
 	}
 
@@ -48,6 +52,8 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to process payload", http.StatusInternalServerError)
 		return
 	}
+	
+	log.Info("Processed payload successfully")
 
 	responseJSON, err := encodeToJSON(payload)
 	if err != nil {

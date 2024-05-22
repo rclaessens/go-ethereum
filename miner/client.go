@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+
+	"github.com/ethereum/go-ethereum/log"
 )
 
 // encodeEnvironmentToJson converts the Environment struct to a JSON string.
@@ -17,6 +19,7 @@ func encodeEnvironmentToJson(payload *ServerPayload) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	log.Info("Encoded environment to JSON", "json", string(jsonData))
 	return string(jsonData), nil
 }
 
@@ -34,7 +37,7 @@ func decodeJsonToEnvironment(jsonData string) (*ServerPayload, error) {
 // and returns the JSON response from the server.
 func tlsCallToServer(envJson string) (string, error) {
 	// URL of the server endpoint
-	url := "https://localhost:8080"
+	url := "http://localhost:8080"
 
 	// Create a new HTTP client with default settings
 	client := &http.Client{}
@@ -44,6 +47,7 @@ func tlsCallToServer(envJson string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	log.Info("Sending request to server", "url", url)
 
 	// Set the appropriate HTTP headers for JSON content
 	req.Header.Set("Content-Type", "application/json")
@@ -60,6 +64,7 @@ func tlsCallToServer(envJson string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	log.Info("Received response from server", "status", resp.Status, "body", string(respBody))
 
 	// Return the body as a string
 	return string(respBody), nil
