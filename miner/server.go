@@ -6,16 +6,29 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 )
 
-func decodeFromJSON (jsonData string) (*ServerPayload, error){
-	var payload ServerPayload
-	err := json.Unmarshal([]byte(jsonData), &payload)
+func decodeFromJSON (jsonData []byte) ([]*types.Transaction, error){
+	log.Info("Received JSON data", "data", string(jsonData))
+	var marshaledTxs []json.RawMessage
+	err := json.Unmarshal(jsonData, &marshaledTxs)
 	if err != nil {
 		return nil, err
 	}
-	return &payload, nil
+
+	var transactions []*types.Transaction
+	for _, marshaledTx := range marshaledTxs {
+		var tx types.Transaction
+		err := tx.UnmarshalJSON([]byte(marshaledTx))
+		if err != nil {
+			return nil, err
+		}
+		transactions = append(transactions, &tx)
+	}
+
+	return transactions, nil
 }
 
 func encodeToJSON(payload *ServerPayload) (string, error){
@@ -35,19 +48,24 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 	log.Info("Received request from client")
 
 	body, err := io.ReadAll(r.Body)
+	log.Info("Received request body", "body", string(body))
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
 		return
 	}
 
-	payload, err := decodeFromJSON(string(body))
+	payload, err := decodeFromJSON(body)
 	if err != nil {
 		log.Error("Failed to decode JSON", "err", err)
 		http.Error(w, "Failed to decode JSON", http.StatusBadRequest) // TO DO : because it fails
 		return
 	}
 
-	err = miner.processPayload(payload)
+	for _, tx := range payload {
+		log.Info("Decoded transaction", "tx", tx.Nonce())
+	}
+
+	/*err = miner.processPayload(payload)
 	if err != nil {
 		http.Error(w, "Failed to process payload", http.StatusInternalServerError)
 		return
@@ -59,11 +77,11 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Error encoding response JSON", http.StatusInternalServerError)
 		return
-	}
+	}*/
 
 	// Send back the updated payload
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprint(w, responseJSON)
+	fmt.Fprint(w, "Decoded payload", payload) // TO DO : change to responseJSON
 }
 
 func (miner *Miner) processPayload (payload *ServerPayload) error {

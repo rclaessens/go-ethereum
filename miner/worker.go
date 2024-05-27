@@ -211,6 +211,7 @@ func (miner *Miner) makeEnv(parent *types.Header, header *types.Header, coinbase
 	if err != nil {
 		return nil, err
 	}
+	log.Info("Making new environment", "parent", parent.Number, "header", header.Number)
 	// Note the passed coinbase may be different with header.Coinbase.
 	return &Environment{
 		Signer:   types.MakeSigner(miner.chainConfig, header.Number, header.Time),
@@ -412,33 +413,42 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *Environment) 
 		}
 	}
 	if (miner.clientMode){
-		payload := ServerPayload{
-			Env:            env,
-			LocalPlainTxs:  localPlainTxs,
-			LocalBlobTxs:   localBlobTxs,
-			RemotePlainTxs: remotePlainTxs,
-			RemoteBlobTxs:  remoteBlobTxs,
-			Interrupt:      interrupt,
+		var allTransactions []*types.Transaction
+		for _, txs := range localPlainTxs {
+			for _, lazyTx := range txs {
+				tx := lazyTx.Resolve()
+				allTransactions = append(allTransactions, tx)
+			}
 		}
-	
-		payloadJSON, err := encodeEnvironmentToJson(&payload)
+		for _, txs := range localBlobTxs {
+			for _, lazyTx := range txs {
+				tx := lazyTx.Resolve()
+				allTransactions = append(allTransactions, tx)
+			}
+		}
+		for _, txs := range remotePlainTxs {
+			for _, lazyTx := range txs {
+				tx := lazyTx.Resolve()
+				allTransactions = append(allTransactions, tx)
+			}
+		}
+		for _, txs := range remoteBlobTxs {
+			for _, lazyTx := range txs {
+				tx := lazyTx.Resolve()
+				allTransactions = append(allTransactions, tx)
+			}
+		}
+		// Send all transactions to the client
+		JSONtx, err := encodeEnvironmentToJson(allTransactions)
 		if err != nil {
 			return err
 		}
-	
-		validatedJSON, err := tlsCallToServer(payloadJSON)
-		if err != nil {
-			return err
+		if JSONtx != nil {
+			_, err = tlsCallToServer(JSONtx)
+			if err != nil {
+				return err
+			}
 		}
-	
-		validatedPayload, err := decodeJsonToEnvironment(validatedJSON)
-		if err != nil {
-			return err
-		}
-	
-		*env = *validatedPayload.Env
-
-		return nil
 	}
 
 	// Fill the block with all available pending transactions.
