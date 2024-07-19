@@ -89,6 +89,7 @@ type generateParams struct {
 
 // generateWork generates a sealing block based on the given parameters.
 func (miner *Miner) generateWork(params *generateParams) *newPayloadResult {
+	log.Info("generateWork")
 	work, err := miner.prepareWork(params)
 	if err != nil {
 		return &newPayloadResult{err: err}

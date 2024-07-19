@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -77,13 +76,11 @@ type Miner struct {
 	clientMode  bool
 }
 
-type ServerPayload struct {
-	Env             *Environment
-	LocalPlainTxs   map[common.Address][]*txpool.LazyTransaction
-	LocalBlobTxs    map[common.Address][]*txpool.LazyTransaction
-	RemotePlainTxs  map[common.Address][]*txpool.LazyTransaction
-	RemoteBlobTxs   map[common.Address][]*txpool.LazyTransaction
-	Interrupt 	    *atomic.Int32
+type ValidationResult struct {
+    TxHash    string          `json:"tx_hash"`
+    Valid     bool            `json:"valid"`
+    Error     string          `json:"error,omitempty"`
+    // StateDiff gethclient.OverrideAccount `json:"state_diff,omitempty"`
 }
 
 // New creates a new miner with provided config.
