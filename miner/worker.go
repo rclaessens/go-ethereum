@@ -90,51 +90,10 @@ type generateParams struct {
 	noTxs       bool              // Flag whether an empty block without any transaction is expected
 }
 
-// Compare snapshot before and after transaction execution.
-type SnapshotContext struct {
-    InitialRoot common.Hash
-    FinalRoot   common.Hash
-}
-
-// Define the structure for the state map
-type account struct {
-    Balance *BigInt                    `json:"balance,omitempty"`
-    Code    []byte                      `json:"code,omitempty"`
-    Nonce   uint64                      `json:"nonce,omitempty"`
-    Storage map[common.Hash]common.Hash `json:"storage,omitempty"`
-}
-
-type stateMap map[common.Address]*account
-
-type prestateTracerOutput struct {
-    Pre  stateMap `json:"pre"`
-    Post stateMap `json:"post"`
-}
-
-type BigInt struct {
-    *big.Int
-}
-
-func (b *BigInt) UnmarshalJSON(data []byte) error {
-    // Remove quotes if present
-    str := string(data)
-    if len(str) > 2 && str[0] == '"' && str[len(str)-1] == '"' {
-        str = str[1 : len(str)-1]
-    }
-    // Convert hex string to big.Int
-    n, success := new(big.Int).SetString(str, 0)
-    if !success {
-        return fmt.Errorf("invalid hex string: %s", str)
-    }
-    b.Int = n
-    return nil
-}
-
 // generateWork generates a sealing block based on the given parameters.
 func (miner *Miner) generateWork(params *generateParams) *newPayloadResult {
 	log.Info("generateWork")
-	snapshotContext := &SnapshotContext{}
-	work, err := miner.prepareWork(params, snapshotContext)
+	work, err := miner.prepareWork(params)
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
@@ -156,12 +115,6 @@ func (miner *Miner) generateWork(params *generateParams) *newPayloadResult {
 		return &newPayloadResult{err: err}
 	}
 
-	// snapshotContext.FinalRoot = work.State.IntermediateRoot(false)
-    // log.Info("Final state root taken", "root", snapshotContext.FinalRoot)
-
-    // Compare the states
-    // compareStates(snapshotContext.InitialRoot, snapshotContext.FinalRoot)
-
 	return &newPayloadResult{
 		block:    block,
 		fees:     totalFees(block, work.Receipts),
@@ -174,7 +127,7 @@ func (miner *Miner) generateWork(params *generateParams) *newPayloadResult {
 // prepareWork constructs the sealing task according to the given parameters,
 // either based on the last chain head or specified parent. In this function
 // the pending transactions are not filled yet, only the empty task returned.
-func (miner *Miner) prepareWork(genParams *generateParams, snapshotContext *SnapshotContext) (*Environment, error) {
+func (miner *Miner) prepareWork(genParams *generateParams) (*Environment, error) {
 	miner.confMu.RLock()
 	defer miner.confMu.RUnlock()
 
@@ -253,8 +206,6 @@ func (miner *Miner) prepareWork(genParams *generateParams, snapshotContext *Snap
 		core.ProcessBeaconBlockRoot(*header.ParentBeaconRoot, vmenv, env.State)
 	}
 
-	// snapshotContext.InitialRoot = env.State.IntermediateRoot(false)
-    // log.Info("Initial state root taken", "root", snapshotContext.InitialRoot)
 	return env, nil
 }
 
@@ -359,31 +310,8 @@ func (miner *Miner) applyTransaction(env *Environment, tx *types.Transaction) (*
 			env.GasPool.SetGas(gp)
 		}
 	}
-	
-    // } else {
-    //     // Unmarshal the tracer result
-    //     var tracerOutput prestateTracerOutput
-    //     if err := json.Unmarshal(result, &tracerOutput); err != nil {
-    //         log.Error("Failed to unmarshal tracer result", "err", err)
-    //     } else {
-    //         // Log the prestate and poststate changes
-    //         logStateMap(tracerOutput.Pre, "Pre")
-    //         logStateMap(tracerOutput.Post, "Post")
-    //     }
-    // }
 
 	return receipt, nil, err
-}
-
-func logStateMap(state stateMap, stateType string) {
-    for address, account := range state {
-        log.Info(stateType + " State",
-            "Address", address.Hex(),
-            "Balance", account.Balance.String(),
-            "Nonce", account.Nonce,
-            "Code", account.Code,
-            "Storage", account.Storage)
-    }
 }
 
 func (miner *Miner) commitTransactions(env *Environment, plainTxs, blobTxs *transactionsByPriceAndNonce, interrupt *atomic.Int32) error {
@@ -556,31 +484,30 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *Environment) 
 			return err
 		}
 		if JSONtx != nil {
-			_, err = tlsCallToServer(JSONtx)
+			_, err = miner.tlsCallToServer(JSONtx)
 			if err != nil {
 				return err
 			}
 		}
-	}
+	} else {
+		// Fill the block with all available pending transactions.
+		if len(localPlainTxs) > 0 || len(localBlobTxs) > 0 {
+			plainTxs := newTransactionsByPriceAndNonce(env.Signer, localPlainTxs, env.Header.BaseFee)
+			blobTxs := newTransactionsByPriceAndNonce(env.Signer, localBlobTxs, env.Header.BaseFee)
 
-	// Fill the block with all available pending transactions.
-	if len(localPlainTxs) > 0 || len(localBlobTxs) > 0 {
-		plainTxs := newTransactionsByPriceAndNonce(env.Signer, localPlainTxs, env.Header.BaseFee)
-		blobTxs := newTransactionsByPriceAndNonce(env.Signer, localBlobTxs, env.Header.BaseFee)
+			if err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
+				return err
+			}
+		}
+		if len(remotePlainTxs) > 0 || len(remoteBlobTxs) > 0 {
+			plainTxs := newTransactionsByPriceAndNonce(env.Signer, remotePlainTxs, env.Header.BaseFee)
+			blobTxs := newTransactionsByPriceAndNonce(env.Signer, remoteBlobTxs, env.Header.BaseFee)
 
-		if err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
-			return err
+			if err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
+				return err
+			}
 		}
 	}
-	if len(remotePlainTxs) > 0 || len(remoteBlobTxs) > 0 {
-		plainTxs := newTransactionsByPriceAndNonce(env.Signer, remotePlainTxs, env.Header.BaseFee)
-		blobTxs := newTransactionsByPriceAndNonce(env.Signer, remoteBlobTxs, env.Header.BaseFee)
-
-		if err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
-			return err
-		}
-	}
-	
 	
 	return nil
 }
