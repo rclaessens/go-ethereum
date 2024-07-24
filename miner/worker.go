@@ -17,6 +17,7 @@
 package miner
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -31,6 +32,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/eth/tracers"
+	"github.com/ethereum/go-ethereum/eth/tracers/native"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
@@ -87,10 +90,51 @@ type generateParams struct {
 	noTxs       bool              // Flag whether an empty block without any transaction is expected
 }
 
+// Compare snapshot before and after transaction execution.
+type SnapshotContext struct {
+    InitialRoot common.Hash
+    FinalRoot   common.Hash
+}
+
+// Define the structure for the state map
+type account struct {
+    Balance *BigInt                    `json:"balance,omitempty"`
+    Code    []byte                      `json:"code,omitempty"`
+    Nonce   uint64                      `json:"nonce,omitempty"`
+    Storage map[common.Hash]common.Hash `json:"storage,omitempty"`
+}
+
+type stateMap map[common.Address]*account
+
+type prestateTracerOutput struct {
+    Pre  stateMap `json:"pre"`
+    Post stateMap `json:"post"`
+}
+
+type BigInt struct {
+    *big.Int
+}
+
+func (b *BigInt) UnmarshalJSON(data []byte) error {
+    // Remove quotes if present
+    str := string(data)
+    if len(str) > 2 && str[0] == '"' && str[len(str)-1] == '"' {
+        str = str[1 : len(str)-1]
+    }
+    // Convert hex string to big.Int
+    n, success := new(big.Int).SetString(str, 0)
+    if !success {
+        return fmt.Errorf("invalid hex string: %s", str)
+    }
+    b.Int = n
+    return nil
+}
+
 // generateWork generates a sealing block based on the given parameters.
 func (miner *Miner) generateWork(params *generateParams) *newPayloadResult {
 	log.Info("generateWork")
-	work, err := miner.prepareWork(params)
+	snapshotContext := &SnapshotContext{}
+	work, err := miner.prepareWork(params, snapshotContext)
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
@@ -111,6 +155,13 @@ func (miner *Miner) generateWork(params *generateParams) *newPayloadResult {
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
+
+	// snapshotContext.FinalRoot = work.State.IntermediateRoot(false)
+    // log.Info("Final state root taken", "root", snapshotContext.FinalRoot)
+
+    // Compare the states
+    // compareStates(snapshotContext.InitialRoot, snapshotContext.FinalRoot)
+
 	return &newPayloadResult{
 		block:    block,
 		fees:     totalFees(block, work.Receipts),
@@ -123,7 +174,7 @@ func (miner *Miner) generateWork(params *generateParams) *newPayloadResult {
 // prepareWork constructs the sealing task according to the given parameters,
 // either based on the last chain head or specified parent. In this function
 // the pending transactions are not filled yet, only the empty task returned.
-func (miner *Miner) prepareWork(genParams *generateParams) (*Environment, error) {
+func (miner *Miner) prepareWork(genParams *generateParams, snapshotContext *SnapshotContext) (*Environment, error) {
 	miner.confMu.RLock()
 	defer miner.confMu.RUnlock()
 
@@ -201,6 +252,9 @@ func (miner *Miner) prepareWork(genParams *generateParams) (*Environment, error)
 		vmenv := vm.NewEVM(context, vm.TxContext{}, env.State, miner.chainConfig, vm.Config{})
 		core.ProcessBeaconBlockRoot(*header.ParentBeaconRoot, vmenv, env.State)
 	}
+
+	// snapshotContext.InitialRoot = env.State.IntermediateRoot(false)
+    // log.Info("Initial state root taken", "root", snapshotContext.InitialRoot)
 	return env, nil
 }
 
@@ -226,7 +280,7 @@ func (miner *Miner) commitTransaction(env *Environment, tx *types.Transaction) e
 	if tx.Type() == types.BlobTxType {
 		return miner.commitBlobTransaction(env, tx)
 	}
-	receipt, err := miner.applyTransaction(env, tx)
+	receipt, _, err := miner.applyTransaction(env, tx)
 	if err != nil {
 		return err
 	}
@@ -248,7 +302,7 @@ func (miner *Miner) commitBlobTransaction(env *Environment, tx *types.Transactio
 	if (env.Blobs+len(sc.Blobs))*params.BlobTxBlobGasPerBlob > params.MaxBlobGasPerBlock {
 		return errors.New("max data blobs reached")
 	}
-	receipt, err := miner.applyTransaction(env, tx)
+	receipt, _, err := miner.applyTransaction(env, tx)
 	if err != nil {
 		return err
 	}
@@ -262,17 +316,74 @@ func (miner *Miner) commitBlobTransaction(env *Environment, tx *types.Transactio
 }
 
 // applyTransaction runs the transaction. If execution fails, state and gas pool are reverted.
-func (miner *Miner) applyTransaction(env *Environment, tx *types.Transaction) (*types.Receipt, error) {
+func (miner *Miner) applyTransaction(env *Environment, tx *types.Transaction) (*types.Receipt, json.RawMessage, error) {
 	var (
 		snap = env.State.Snapshot()
 		gp   = env.GasPool.Gas()
+		receipt *types.Receipt
+		err error
 	)
-	receipt, err := core.ApplyTransaction(miner.chainConfig, miner.chain, &env.Coinbase, env.GasPool, env.State, env.Header, tx, &env.Header.GasUsed, vm.Config{})
-	if err != nil {
-		env.State.RevertToSnapshot(snap)
-		env.GasPool.SetGas(gp)
+
+	if(miner.serverMode){
+		// Initialize the prestate tracer
+		tracer, err := initializePrestateTracer()
+		if err != nil {
+			log.Error("Failed to initialize prestate tracer", "err", err)
+			return nil, nil, err
+		}
+	
+		// Attach the tracer to the VM context
+		vmConfig := vm.Config{
+			Tracer: tracer.Hooks,
+		}
+	
+		receipt, err = core.ApplyTransaction(miner.chainConfig, miner.chain, &env.Coinbase, env.GasPool, env.State, env.Header, tx, &env.Header.GasUsed, vmConfig)
+		if err != nil {
+			env.State.RevertToSnapshot(snap)
+			env.GasPool.SetGas(gp)
+		}
+	
+		// Get the tracer result
+		result, tracerErr := tracer.GetResult()
+		if tracerErr != nil {
+			log.Error("Failed to get tracer result", "err", tracerErr)
+		}
+		log.Info("Tracer result", "result", string(result))
+
+		return receipt, result, err
+
+	} else {
+		receipt, err = core.ApplyTransaction(miner.chainConfig, miner.chain, &env.Coinbase, env.GasPool, env.State, env.Header, tx, &env.Header.GasUsed, vm.Config{})
+		if err != nil {
+			env.State.RevertToSnapshot(snap)
+			env.GasPool.SetGas(gp)
+		}
 	}
-	return receipt, err
+	
+    // } else {
+    //     // Unmarshal the tracer result
+    //     var tracerOutput prestateTracerOutput
+    //     if err := json.Unmarshal(result, &tracerOutput); err != nil {
+    //         log.Error("Failed to unmarshal tracer result", "err", err)
+    //     } else {
+    //         // Log the prestate and poststate changes
+    //         logStateMap(tracerOutput.Pre, "Pre")
+    //         logStateMap(tracerOutput.Post, "Post")
+    //     }
+    // }
+
+	return receipt, nil, err
+}
+
+func logStateMap(state stateMap, stateType string) {
+    for address, account := range state {
+        log.Info(stateType + " State",
+            "Address", address.Hex(),
+            "Balance", account.Balance.String(),
+            "Nonce", account.Nonce,
+            "Code", account.Code,
+            "Storage", account.Storage)
+    }
 }
 
 func (miner *Miner) commitTransactions(env *Environment, plainTxs, blobTxs *transactionsByPriceAndNonce, interrupt *atomic.Int32) error {
@@ -498,3 +609,70 @@ func signalToErr(signal int32) error {
 		panic(fmt.Errorf("undefined signal %d", signal))
 	}
 }
+
+// Compare the states at the given snapshots
+// func compareStates(initialRoot, finalRoot common.Hash) {
+//     if initialRoot != finalRoot {
+//         log.Info("States are different", "initialRoot", initialRoot, "finalRoot", finalRoot)
+//     } else {
+//         log.Info("States are identical", "root", initialRoot)
+//     }
+// }
+
+
+// Initialize the prestate tracer
+func initializePrestateTracer() (*tracers.Tracer, error) {
+    tracerCtx := &tracers.Context{
+        BlockHash: common.Hash{}, // Set the correct block hash
+    }
+    config := json.RawMessage(`{"diffMode": true}`)
+    tracer, err := native.NewPrestateTracer(tracerCtx, config)
+    if err != nil {
+        return nil, err
+    }
+	// log.Info("Prestate tracer initialized")
+    return tracer, nil
+}
+
+//// Function to process transactions with tracing enabled
+//func (miner *Miner) processTransactionsAndTrace(work *Environment) error {
+//    // Initialize the prestate tracer
+//    tracer, err := initializePrestateTracer()
+//    if err != nil {
+//        return err
+//    }
+//
+//    // Attach the tracer to the VM context
+//    vmConfig := vm.Config{
+//        Tracer: tracer.Hooks,
+//    }
+//
+//    for _, tx := range work.Txs {
+//        // Process the transaction with the tracer
+//        receipt, err := applyTransactionWithTracing(work.State, tx, work.Header, vmConfig)
+//        if err != nil {
+//            return err
+//        }
+//        work.Receipts = append(work.Receipts, receipt)
+//    }
+//
+//    // Get the tracer result
+//    result, err := tracer.GetResult()
+//    if err != nil {
+//        return err
+//    }
+//
+//    log.Info("Tracer result: %+v", result)
+//
+//    return nil
+//}
+//
+//// Function to apply a transaction with tracing enabled
+//func applyTransactionWithTracing(stateDB *state.StateDB, tx *types.Transaction, header *types.Header, vmConfig vm.Config) (*types.Receipt, error) {
+//    // Simplified example of processing a transaction
+//    receipt, err := core.ApplyTransaction(stateDB, tx, header, vmConfig)
+//    if err != nil {
+//        return nil, err
+//    }
+//    return receipt, nil
+//}

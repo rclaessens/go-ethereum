@@ -189,11 +189,16 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 		if ctx.Bool(utils.ServerModeFlag.Name) {
 			log.Info("Starting in server mode")
 			go httpListener(eth.Miner())
-		}
-	
-		if ctx.Bool(utils.ClientModeFlag.Name) {
+			eth.Miner().SetServerMode(true)
+			eth.Miner().SetClientMode(false)
+		} else if ctx.Bool(utils.ClientModeFlag.Name) {
 			log.Info("Starting in client mode")
+			eth.Miner().SetServerMode(false)
 			eth.Miner().SetClientMode(true)
+		} else {
+			log.Info("Starting in default mode")
+			eth.Miner().SetServerMode(false)
+			eth.Miner().SetClientMode(false)
 		}
 	}
 	

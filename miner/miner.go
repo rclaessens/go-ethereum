@@ -74,6 +74,7 @@ type Miner struct {
 	pending     *pending
 	pendingMu   sync.Mutex // Lock protects the pending block
 	clientMode  bool
+	serverMode  bool
 }
 
 type ValidationResult struct {
@@ -97,6 +98,10 @@ func New(eth Backend, config Config, engine consensus.Engine) *Miner { // return
 
 func(miner *Miner) SetClientMode(clientMode bool) {
 	miner.clientMode = clientMode
+}
+
+func(miner *Miner) SetServerMode(serverMode bool) {
+	miner.serverMode = serverMode
 }
 
 // Pending returns the currently pending block and associated receipts, logs

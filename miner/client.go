@@ -85,6 +85,23 @@ func tlsCallToServer(envJson []byte) ([]byte, error) {
 		return nil, err
 	}
 	log.Info("Received response from server", "status", resp.Status, "body", string(respBody))
+	var stateModifications []json.RawMessage
+	if err := json.Unmarshal(respBody, &stateModifications); err != nil {
+		log.Error("Failed to decode JSON response: %v", err)
+	}
+
+	// Print the decoded JSON (for debugging purposes)
+	for _, sm := range stateModifications {
+		var prettyJSON map[string]interface{}
+		if err := json.Unmarshal(sm, &prettyJSON); err != nil {
+			log.Error("Failed to decode individual state modification: %v", err)
+		}
+		pretty, err := json.MarshalIndent(prettyJSON, "", "  ")
+		if err != nil {
+			log.Error("Failed to pretty print JSON: %v", err)
+		}
+		log.Info(string(pretty))
+	}
 
 	// Return the body as a string
 	return respBody, nil

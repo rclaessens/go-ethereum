@@ -2,7 +2,6 @@ package miner
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -32,6 +31,8 @@ func decodeFromJSON (jsonData []byte) ([]*types.Transaction, error){
 		transactions = append(transactions, &tx)
 	}
 
+	log.Info("Received Transactions", "number", len(transactions))
+
 	return transactions, nil
 }
 
@@ -49,20 +50,21 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, err := decodeFromJSON(body)
+	transactions, err := decodeFromJSON(body)
 	if err != nil {
 		log.Error("Failed to decode JSON", "err", err)
 		http.Error(w, "Failed to decode JSON", http.StatusBadRequest) // TO DO : because it fails
 		return
 	}
 
-	err = miner.processPayload(payload)
+	stateModifications, err := miner.processTransactions(transactions)
 	if err != nil {
-		http.Error(w, "Failed to process payload", http.StatusInternalServerError)
+		log.Error("Failed to process transactions", "err", err)
+		http.Error(w, "Failed to process transactions", http.StatusInternalServerError)
 		return
 	}
 	
-	log.Info("Processed payload successfully")
+	log.Info("Processed transactions successfully")
 
 	/*responseJSON, err := encodeToJSON(payload)
 	if err != nil {
@@ -72,10 +74,13 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 
 	// Send back the updated payload
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprint(w, "Decoded payload", payload) // TO DO : change to responseJSON
+	if err := json.NewEncoder(w).Encode(stateModifications); err != nil {
+		http.Error(w, "Error encoding response JSON", http.StatusInternalServerError)
+		return
+	}
 }
 
-func (miner *Miner) processPayload (tx []*types.Transaction) error {
+func (miner *Miner) processTransactions (tx []*types.Transaction) ([]json.RawMessage, error) {
 	parent := miner.chain.CurrentBlock()
 	timestamp  := uint64(time.Now().Unix())
 	withdrawal := types.Withdrawals{}
@@ -100,17 +105,19 @@ func (miner *Miner) processPayload (tx []*types.Transaction) error {
 	}
 	env, err := miner.makeEnv(parent,header,genParams.coinbase)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if env.GasPool == nil {
 		env.GasPool = new(core.GasPool).AddGas(header.GasLimit)
 	}
+	stateModifcations := []json.RawMessage{}
 	// func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error)
 	for _, tx := range tx {
-		_, err := miner.applyTransaction(env, tx)
+		_, result, err := miner.applyTransaction(env, tx)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		stateModifcations = append(stateModifcations, result)
 	}
-	return nil
+	return stateModifcations, nil
 }
