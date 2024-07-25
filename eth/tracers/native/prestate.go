@@ -68,6 +68,10 @@ type prestateTracer struct {
 	reason    error       // Textual reason for the interruption
 	created   map[common.Address]bool
 	deleted   map[common.Address]bool
+
+	// Info about the current transaction
+	tx 		  *types.Transaction
+	receipt   *types.Receipt
 }
 
 type prestateTracerConfig struct {
@@ -148,6 +152,7 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 
 func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, from common.Address) {
 	t.env = env
+	t.tx = tx
 	if tx.To() == nil {
 		t.to = crypto.CreateAddress(from, env.StateDB.GetNonce(from))
 		t.created[t.to] = true
@@ -164,6 +169,12 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	if err != nil {
 		return
 	}
+
+	if receipt.Logs == nil {
+		receipt.Logs = []*types.Log{}
+	}
+	t.receipt = receipt
+	
 	if t.config.DiffMode {
 		t.processDiffState()
 	}
@@ -185,7 +196,9 @@ func (t *prestateTracer) GetResult() (json.RawMessage, error) {
 		res, err = json.Marshal(struct {
 			Post stateMap `json:"post"`
 			Pre  stateMap `json:"pre"`
-		}{t.post, t.pre})
+			Tx  *types.Transaction `json:"tx"`
+			Receipt *types.Receipt `json:"receipt"`
+		}{t.post, t.pre, t.tx, t.receipt})
 	} else {
 		res, err = json.Marshal(t.pre)
 	}

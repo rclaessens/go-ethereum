@@ -226,7 +226,6 @@ func (miner *Miner) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 			select {
 			case <-timer.C:
 				start := time.Now()
-				log.Info("Build full")
 				r := miner.generateWork(fullParams)
 				if r.err == nil {
 					payload.update(r, time.Since(start))

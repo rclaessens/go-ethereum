@@ -66,12 +66,6 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 	
 	log.Info("Processed transactions successfully")
 
-	/*responseJSON, err := encodeToJSON(payload)
-	if err != nil {
-		http.Error(w, "Error encoding response JSON", http.StatusInternalServerError)
-		return
-	}*/
-
 	// Send back the updated payload
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(stateModifications); err != nil {

@@ -48,6 +48,8 @@ type account struct {
 type stateModification struct {
 	Pre 	stateMap `json:"pre"`
 	Post    stateMap `json:"post"`
+	Tx 	    *types.Transaction `json:"tx"`
+	Receipt *types.Receipt `json:"receipt"`
 } 
 
 // encodeEnvironmentToJson converts the Environment struct to a JSON string.
@@ -75,7 +77,7 @@ func encodeEnvironmentToJson(transactions []*types.Transaction) ([]byte, error) 
 
 // tlsCallToServer makes a secure HTTP call to the server, sending the JSON-encoded Environment
 // and returns the JSON response from the server.
-func (miner *Miner) tlsCallToServer(envJson []byte) ([]byte, error) {
+func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, error) {
 	// URL of the server endpoint
 	url := "http://localhost:8080"
 
@@ -125,23 +127,42 @@ func (miner *Miner) tlsCallToServer(envJson []byte) ([]byte, error) {
 		post := sm.Post
 		updates := comparePrePostStates(pre, post)
 		miner.updateState(updates)
-		for addr, acc := range updates {
-			log.Info("Address", "address", addr.Hex())
-			if acc.Balance != nil {
-				log.Info("  Balance", "balance", acc.Balance.String())
-			}
-			if acc.Nonce != 0 {
-				log.Info("  Nonce", "nonce", acc.Nonce)
-			}
-			if acc.Code != nil {
-				log.Info("  Code", "code", acc.Code)
-			}
-			if acc.Storage != nil {
-				log.Info("  Storage", "storage", acc.Storage)
-			}
-		}
+		env.Txs = append(env.Txs, sm.Tx)
+		env.Tcount++
+		env.Receipts = append(env.Receipts, sm.Receipt)
+		// for addr, acc := range updates {
+		// 	log.Info("Address", "address", addr.Hex())
+		// 	if acc.Balance != nil {
+		// 		log.Info("  Balance", "balance", acc.Balance.String())
+		// 	}
+		// 	if acc.Nonce != 0 {
+		// 		log.Info("  Nonce", "nonce", acc.Nonce)
+		// 	}
+		// 	if acc.Code != nil {
+		// 		log.Info("  Code", "code", acc.Code)
+		// 	}
+		// 	if acc.Storage != nil {
+		// 		log.Info("  Storage", "storage", acc.Storage)
+		// 	}
+		// }
 	}
 	log.Info("Updated state successfully")	
+
+	
+
+	// body := types.Body{Transactions: work.Txs, Withdrawals: params.withdrawals}
+	// block, err := miner.engine.FinalizeAndAssemble(miner.chain, work.Header, work.State, &body, work.Receipts)
+	// if err != nil {
+	// 	return &newPayloadResult{err: err}
+	// }
+
+	// return &newPayloadResult{
+	// 	block:    block,
+	// 	fees:     totalFees(block, work.Receipts),
+	// 	sidecars: work.Sidecars,
+	// 	stateDB:  work.State,
+	// 	receipts: work.Receipts,
+	// }
 
 	// Return the body as a string
 	return respBody, nil

@@ -92,7 +92,6 @@ type generateParams struct {
 
 // generateWork generates a sealing block based on the given parameters.
 func (miner *Miner) generateWork(params *generateParams) *newPayloadResult {
-	log.Info("generateWork")
 	work, err := miner.prepareWork(params)
 	if err != nil {
 		return &newPayloadResult{err: err}
@@ -299,7 +298,6 @@ func (miner *Miner) applyTransaction(env *Environment, tx *types.Transaction) (*
 		if tracerErr != nil {
 			log.Error("Failed to get tracer result", "err", tracerErr)
 		}
-		log.Info("Tracer result", "result", string(result))
 
 		return receipt, result, err
 
@@ -484,7 +482,7 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *Environment) 
 			return err
 		}
 		if JSONtx != nil {
-			_, err = miner.tlsCallToServer(JSONtx)
+			_, err = miner.tlsCallToServer(JSONtx, env)
 			if err != nil {
 				return err
 			}
