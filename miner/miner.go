@@ -85,7 +85,7 @@ type ValidationResult struct {
 }
 
 // New creates a new miner with provided config.
-func New(eth Backend, config Config, engine consensus.Engine) *Miner { // return go httpListener ? 
+func New(eth Backend, config Config, engine consensus.Engine) *Miner { 
 	return &Miner{
 		config:      &config,
 		chainConfig: eth.BlockChain().Config(),

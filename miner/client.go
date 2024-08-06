@@ -2,14 +2,21 @@ package miner
 
 import (
 	"bytes"
+	"crypto/tls"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"math/big"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/edgelesssys/ego/attestation"
+	"github.com/edgelesssys/ego/eclient"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -52,27 +59,53 @@ type stateModification struct {
 	Receipt *types.Receipt `json:"receipt"`
 } 
 
+func createTLSConfig(signer []byte) (*tls.Config, error) {
+	verifyReport := func(report attestation.Report) error {
+		
+		if report.SecurityVersion < 2 {
+			return errors.New("invalid security version")
+		}
+		if binary.LittleEndian.Uint16(report.ProductID) != 1234 {
+			return errors.New("invalid product")
+		}
+		if !bytes.Equal(report.SignerID, signer) {
+			return errors.New("invalid signer")
+		}
+		// Add verifications
+		return nil
+	}
+
+	// Create a TLS config that verifies a certificate with embedded report.
+	tlsConfig := eclient.CreateAttestationClientTLSConfig(verifyReport)
+	return tlsConfig, nil
+}
+
 // encodeEnvironmentToJson converts the Environment struct to a JSON string.
-func encodeEnvironmentToJson(transactions []*types.Transaction) ([]byte, error) {
+func encodeEnvironmentToJson(transactions []*types.Transaction, env *Environment) ([]byte, error) {
 	if len(transactions) == 0 {
 		log.Info("No transactions to encode")
 		return nil, nil
 	}
-	var marshaledTxs []json.RawMessage
-	for _, tx := range transactions {
-		marshaledTx, err := tx.MarshalJSON()
-		log.Info("Marshaled transaction to JSON", "json", string(marshaledTx))
-		if err != nil {
-			return nil, err
-		}
-		marshaledTxs = append(marshaledTxs, marshaledTx)
-	}
-	marshaledTxsJson, err := json.Marshal(marshaledTxs)
-	if err != nil {
-		return nil, err
-	}
-	log.Info("Encoded transactions to JSON", "json", string(marshaledTxsJson))
-	return marshaledTxsJson, nil
+
+	clientEnv := &Environment{
+        Coinbase: env.Coinbase,
+        Header:   env.Header,
+    }
+
+	res, err := json.Marshal(struct {
+        Transactions []*types.Transaction `json:"transactions"`
+        Env          *Environment         `json:"env"`
+    }{
+        Transactions: transactions,
+        Env:      clientEnv,
+    })
+    if err != nil {
+        log.Error("Failed to encode environment to JSON", "err", err)
+        return nil, err
+    }
+	log.Info("Encoded transactions to JSON", "json", string(res))
+
+	return res, nil
 }
 
 // tlsCallToServer makes a secure HTTP call to the server, sending the JSON-encoded Environment
@@ -81,8 +114,23 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	// URL of the server endpoint
 	url := "http://localhost:8080"
 
-	// Create a new HTTP client with default settings
-	client := &http.Client{}
+	dummySignerID := "dummysignerid1234567890abcdef"
+	signer, _ := hex.DecodeString(dummySignerID)
+
+
+	// Create a TLS config for secure communication
+	tlsConfig, err := createTLSConfig(signer)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a new HTTP client with the TLS configuration
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+		Timeout: 10 * time.Second, // Set an appropriate timeout
+	}
 
 	// Create a new POST request with the JSON data
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(envJson))
@@ -108,13 +156,13 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 		return nil, err
 	}
 	log.Info("Received response from server", "status", resp.Status, "body", string(respBody))
-	var respMessage []json.RawMessage
+	var respMessage clientResponse
 	if err := json.Unmarshal(respBody, &respMessage); err != nil {
 		log.Error("Failed to decode JSON response: %v", err)
 	}
 
 	var stateModifications []stateModification
-	for _, stateModif := range respMessage {
+	for _, stateModif := range respMessage.Results {
 		var sm stateModification
 		if err := json.Unmarshal(stateModif, &sm); err != nil {
 			log.Error("Failed to decode state modification: %v", err)
@@ -122,14 +170,16 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 		stateModifications = append(stateModifications, sm)
 	}
 
+	// var receipts []*types.Receipt
 	for _, sm := range stateModifications {
 		pre := sm.Pre
 		post := sm.Post
 		updates := comparePrePostStates(pre, post)
-		miner.updateState(updates)
+		env.State = miner.updateState(updates, env.State)
 		env.Txs = append(env.Txs, sm.Tx)
 		env.Tcount++
 		env.Receipts = append(env.Receipts, sm.Receipt)
+		env.Header.GasUsed += sm.Receipt.GasUsed
 		// for addr, acc := range updates {
 		// 	log.Info("Address", "address", addr.Hex())
 		// 	if acc.Balance != nil {
@@ -146,25 +196,8 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 		// 	}
 		// }
 	}
+
 	log.Info("Updated state successfully")	
-
-	
-
-	// body := types.Body{Transactions: work.Txs, Withdrawals: params.withdrawals}
-	// block, err := miner.engine.FinalizeAndAssemble(miner.chain, work.Header, work.State, &body, work.Receipts)
-	// if err != nil {
-	// 	return &newPayloadResult{err: err}
-	// }
-
-	// return &newPayloadResult{
-	// 	block:    block,
-	// 	fees:     totalFees(block, work.Receipts),
-	// 	sidecars: work.Sidecars,
-	// 	stateDB:  work.State,
-	// 	receipts: work.Receipts,
-	// }
-
-	// Return the body as a string
 	return respBody, nil
 }
 
@@ -229,12 +262,7 @@ func comparePrePostStates(pre, post stateMap) map[common.Address]account {
 	return updates
 }
 
-func (miner *Miner)updateState(updates map[common.Address]account){
-	state, err := miner.chain.State()
-	if err != nil {
-		log.Error("Failed to get state", "err", err)
-		return
-	}
+func (miner *Miner)updateState(updates map[common.Address]account, state *state.StateDB)(*state.StateDB) {
 	for addr, acc := range updates {
 		if acc.Balance != nil {
 			amount, _ := uint256.FromBig(&acc.Balance.Int)
@@ -250,4 +278,5 @@ func (miner *Miner)updateState(updates map[common.Address]account){
 			state.SetState(addr, key, val)
 		}
 	}
+	return state
 }

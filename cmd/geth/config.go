@@ -48,6 +48,7 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/naoina/toml"
 	"github.com/urfave/cli/v2"
+	"github.com/edgelesssys/ego/enclave"
 )
 
 var (
@@ -263,11 +264,23 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 }
 
 func httpListener(miner *miner.Miner) {
-    http.HandleFunc("/", miner.Handler) // Use Miner's handler method
+    // Create a TLS config with a self-signed certificate and an embedded report.
+    tlsCfg, err := enclave.CreateAttestationServerTLSConfig()
+    if err != nil {
+        log.Error("Failed to create TLS config", "error", err)
+        return
+    }
 
-    log.Info("HTTP server started")
-    if err := http.ListenAndServe(":8080", nil); err != nil {
-        log.Error("HTTP server failed to start", "error", err)
+    // Create HTTPS server
+    server := &http.Server{
+        Addr:      ":8080",
+        TLSConfig: tlsCfg,
+        Handler:   http.HandlerFunc(miner.Handler), // Use Miner's handler method
+    }
+
+    log.Info("TLS server started")
+    if err := server.ListenAndServeTLS("", ""); err != nil {
+        log.Error("TLS server failed to start", "error", err)
     }
 }
 

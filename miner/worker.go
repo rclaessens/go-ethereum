@@ -109,6 +109,11 @@ func (miner *Miner) generateWork(params *generateParams) *newPayloadResult {
 		}
 	}
 	body := types.Body{Transactions: work.Txs, Withdrawals: params.withdrawals}
+	if(len(work.Txs) > 0){
+		log.Info("Block Header Information",
+    	"GasLimit", work.Header.GasLimit,
+    	"GasUsed", work.Header.GasUsed,)
+	}
 	block, err := miner.engine.FinalizeAndAssemble(miner.chain, work.Header, work.State, &body, work.Receipts)
 	if err != nil {
 		return &newPayloadResult{err: err}
@@ -226,21 +231,21 @@ func (miner *Miner) makeEnv(parent *types.Header, header *types.Header, coinbase
 	}, nil
 }
 
-func (miner *Miner) commitTransaction(env *Environment, tx *types.Transaction) error {
+func (miner *Miner) commitTransaction(env *Environment, tx *types.Transaction) (json.RawMessage, error) {
 	if tx.Type() == types.BlobTxType {
 		return miner.commitBlobTransaction(env, tx)
 	}
-	receipt, _, err := miner.applyTransaction(env, tx)
+	receipt, result, err := miner.applyTransaction(env, tx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	env.Txs = append(env.Txs, tx)
 	env.Receipts = append(env.Receipts, receipt)
 	env.Tcount++
-	return nil
+	return result, nil
 }
 
-func (miner *Miner) commitBlobTransaction(env *Environment, tx *types.Transaction) error {
+func (miner *Miner) commitBlobTransaction(env *Environment, tx *types.Transaction) (json.RawMessage, error) {
 	sc := tx.BlobTxSidecar()
 	if sc == nil {
 		panic("blob transaction without blobs in miner")
@@ -250,11 +255,11 @@ func (miner *Miner) commitBlobTransaction(env *Environment, tx *types.Transactio
 	// and not during execution. This means core.ApplyTransaction will not return an error if the
 	// tx has too many blobs. So we have to explicitly check it here.
 	if (env.Blobs+len(sc.Blobs))*params.BlobTxBlobGasPerBlob > params.MaxBlobGasPerBlock {
-		return errors.New("max data blobs reached")
+		return nil, errors.New("max data blobs reached")
 	}
-	receipt, _, err := miner.applyTransaction(env, tx)
+	receipt, result, err := miner.applyTransaction(env, tx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	env.Txs = append(env.Txs, tx.WithoutBlobTxSidecar())
 	env.Receipts = append(env.Receipts, receipt)
@@ -262,7 +267,7 @@ func (miner *Miner) commitBlobTransaction(env *Environment, tx *types.Transactio
 	env.Blobs += len(sc.Blobs)
 	*env.Header.BlobGasUsed += receipt.BlobGasUsed
 	env.Tcount++
-	return nil
+	return result, nil
 }
 
 // applyTransaction runs the transaction. If execution fails, state and gas pool are reverted.
@@ -312,16 +317,17 @@ func (miner *Miner) applyTransaction(env *Environment, tx *types.Transaction) (*
 	return receipt, nil, err
 }
 
-func (miner *Miner) commitTransactions(env *Environment, plainTxs, blobTxs *transactionsByPriceAndNonce, interrupt *atomic.Int32) error {
+func (miner *Miner) commitTransactions(env *Environment, plainTxs, blobTxs *transactionsByPriceAndNonce, interrupt *atomic.Int32) ([]json.RawMessage, error) {
 	gasLimit := env.Header.GasLimit
 	if env.GasPool == nil {
 		env.GasPool = new(core.GasPool).AddGas(gasLimit)
 	}
+	var results []json.RawMessage
 	for {
 		// Check interruption signal and abort building if it's fired.
 		if interrupt != nil {
 			if signal := interrupt.Load(); signal != commitInterruptNone {
-				return signalToErr(signal)
+				return nil, signalToErr(signal)
 			}
 		}
 		// If we don't have enough gas for any further transactions then we're done.
@@ -391,7 +397,8 @@ func (miner *Miner) commitTransactions(env *Environment, plainTxs, blobTxs *tran
 		// Start executing the transaction
 		env.State.SetTxContext(tx.Hash(), env.Tcount)
 
-		err := miner.commitTransaction(env, tx)
+		result, err := miner.commitTransaction(env, tx)
+		results = append(results, result)
 		switch {
 		case errors.Is(err, core.ErrNonceTooLow):
 			// New head notification data race between the transaction pool and miner, shift
@@ -409,13 +416,13 @@ func (miner *Miner) commitTransactions(env *Environment, plainTxs, blobTxs *tran
 			txs.Pop()
 		}
 	}
-	return nil
+	return results, nil
 }
 
 // fillTransactions retrieves the pending transactions from the txpool and fills them
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
-func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *Environment) error {
+func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *Environment) (error) {
 	miner.confMu.RLock()
 	tip := miner.config.GasPrice
 	miner.confMu.RUnlock()
@@ -436,6 +443,27 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *Environment) 
 	filter.OnlyPlainTxs, filter.OnlyBlobTxs = false, true
 	pendingBlobTxs := miner.txpool.Pending(filter)
 
+	if miner.clientMode {
+		// Convert LazyTransaction to Transaction
+		plainTxs := convertLazyToTransaction(pendingPlainTxs)
+		blobTxs := convertLazyToTransaction(pendingBlobTxs)
+
+		// Combine all transactions
+		allTxs := append(plainTxs, blobTxs...)
+
+		// Send all transactions to the client
+		JSONtx, err := encodeEnvironmentToJson(allTxs, env)
+		if err != nil {
+			return err
+		}
+		if JSONtx != nil {
+			_, err := miner.tlsCallToServer(JSONtx, env)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	// Split the pending transactions into locals and remotes.
 	localPlainTxs, remotePlainTxs := make(map[common.Address][]*txpool.LazyTransaction), pendingPlainTxs
 	localBlobTxs, remoteBlobTxs := make(map[common.Address][]*txpool.LazyTransaction), pendingBlobTxs
@@ -450,60 +478,20 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *Environment) 
 			localBlobTxs[account] = txs
 		}
 	}
-	if (miner.clientMode){
-		var allTransactions []*types.Transaction
-		for _, txs := range localPlainTxs {
-			for _, lazyTx := range txs {
-				tx := lazyTx.Resolve()
-				allTransactions = append(allTransactions, tx)
-			}
-		}
-		for _, txs := range localBlobTxs {
-			for _, lazyTx := range txs {
-				tx := lazyTx.Resolve()
-				allTransactions = append(allTransactions, tx)
-			}
-		}
-		for _, txs := range remotePlainTxs {
-			for _, lazyTx := range txs {
-				tx := lazyTx.Resolve()
-				allTransactions = append(allTransactions, tx)
-			}
-		}
-		for _, txs := range remoteBlobTxs {
-			for _, lazyTx := range txs {
-				tx := lazyTx.Resolve()
-				allTransactions = append(allTransactions, tx)
-			}
-		}
-		// Send all transactions to the client
-		JSONtx, err := encodeEnvironmentToJson(allTransactions)
-		if err != nil {
+
+	// Fill the block with all available pending transactions.
+	if len(localPlainTxs) > 0 || len(localBlobTxs) > 0 {
+		plainTxs := newTransactionsByPriceAndNonce(env.Signer, localPlainTxs, env.Header.BaseFee)
+		blobTxs := newTransactionsByPriceAndNonce(env.Signer, localBlobTxs, env.Header.BaseFee)
+		if _, err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
 			return err
 		}
-		if JSONtx != nil {
-			_, err = miner.tlsCallToServer(JSONtx, env)
-			if err != nil {
-				return err
-			}
-		}
-	} else {
-		// Fill the block with all available pending transactions.
-		if len(localPlainTxs) > 0 || len(localBlobTxs) > 0 {
-			plainTxs := newTransactionsByPriceAndNonce(env.Signer, localPlainTxs, env.Header.BaseFee)
-			blobTxs := newTransactionsByPriceAndNonce(env.Signer, localBlobTxs, env.Header.BaseFee)
-
-			if err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
-				return err
-			}
-		}
-		if len(remotePlainTxs) > 0 || len(remoteBlobTxs) > 0 {
-			plainTxs := newTransactionsByPriceAndNonce(env.Signer, remotePlainTxs, env.Header.BaseFee)
-			blobTxs := newTransactionsByPriceAndNonce(env.Signer, remoteBlobTxs, env.Header.BaseFee)
-
-			if err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
-				return err
-			}
+	}
+	if len(remotePlainTxs) > 0 || len(remoteBlobTxs) > 0 {
+		plainTxs := newTransactionsByPriceAndNonce(env.Signer, remotePlainTxs, env.Header.BaseFee)
+		blobTxs := newTransactionsByPriceAndNonce(env.Signer, remoteBlobTxs, env.Header.BaseFee)
+		if _, err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
+			return err
 		}
 	}
 	
@@ -557,6 +545,16 @@ func initializePrestateTracer() (*tracers.Tracer, error) {
     }
 	// log.Info("Prestate tracer initialized")
     return tracer, nil
+}
+
+func convertLazyToTransaction(lazyTxs map[common.Address][]*txpool.LazyTransaction) []*types.Transaction {
+	var txs []*types.Transaction
+	for _, txList := range lazyTxs {
+		for _, lazyTx := range txList {
+			txs = append(txs, lazyTx.Resolve())
+		}
+	}
+	return txs
 }
 
 //// Function to process transactions with tracing enabled
