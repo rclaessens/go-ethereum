@@ -2,19 +2,13 @@ package miner
 
 import (
 	"bytes"
-	"crypto/tls"
-	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"math/big"
 	"net/http"
 	"strings"
-	"time"
 
-	"github.com/edgelesssys/ego/attestation"
-	"github.com/edgelesssys/ego/eclient"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
@@ -59,26 +53,26 @@ type stateModification struct {
 	Receipt *types.Receipt `json:"receipt"`
 } 
 
-func createTLSConfig(signer []byte) (*tls.Config, error) {
-	verifyReport := func(report attestation.Report) error {
+// func createTLSConfig(signer []byte) (*tls.Config, error) {
+// 	verifyReport := func(report attestation.Report) error {
 		
-		if report.SecurityVersion < 2 {
-			return errors.New("invalid security version")
-		}
-		if binary.LittleEndian.Uint16(report.ProductID) != 1234 {
-			return errors.New("invalid product")
-		}
-		if !bytes.Equal(report.SignerID, signer) {
-			return errors.New("invalid signer")
-		}
-		// Add verifications
-		return nil
-	}
+// 		if report.SecurityVersion < 2 {
+// 			return errors.New("invalid security version")
+// 		}
+// 		if binary.LittleEndian.Uint16(report.ProductID) != 1234 {
+// 			return errors.New("invalid product")
+// 		}
+// 		if !bytes.Equal(report.SignerID, signer) {
+// 			return errors.New("invalid signer")
+// 		}
+// 		// Add verifications
+// 		return nil
+// 	}
 
-	// Create a TLS config that verifies a certificate with embedded report.
-	tlsConfig := eclient.CreateAttestationClientTLSConfig(verifyReport)
-	return tlsConfig, nil
-}
+// 	// Create a TLS config that verifies a certificate with embedded report.
+// 	tlsConfig := eclient.CreateAttestationClientTLSConfig(verifyReport)
+// 	return tlsConfig, nil
+// }
 
 // encodeEnvironmentToJson converts the Environment struct to a JSON string.
 func encodeEnvironmentToJson(transactions []*types.Transaction, env *Environment) ([]byte, error) {
@@ -114,23 +108,26 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	// URL of the server endpoint
 	url := "http://localhost:8080"
 
-	dummySignerID := "dummysignerid1234567890abcdef"
-	signer, _ := hex.DecodeString(dummySignerID)
+	// Create a new HTTP client with default settings
+	client := &http.Client{}
+
+	// dummySignerID := "dummysignerid1234567890abcdef"
+	// signer, _ := hex.DecodeString(dummySignerID)
 
 
-	// Create a TLS config for secure communication
-	tlsConfig, err := createTLSConfig(signer)
-	if err != nil {
-		return nil, err
-	}
+	// // Create a TLS config for secure communication
+	// tlsConfig, err := createTLSConfig(signer)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	// Create a new HTTP client with the TLS configuration
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
-		Timeout: 10 * time.Second, // Set an appropriate timeout
-	}
+	// // Create a new HTTP client with the TLS configuration
+	// client := &http.Client{
+	// 	Transport: &http.Transport{
+	// 		TLSClientConfig: tlsConfig,
+	// 	},
+	// 	Timeout: 10 * time.Second, // Set an appropriate timeout
+	// }
 
 	// Create a new POST request with the JSON data
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(envJson))
