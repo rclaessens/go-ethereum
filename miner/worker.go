@@ -118,7 +118,6 @@ func (miner *Miner) generateWork(params *generateParams) *newPayloadResult {
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
-
 	return &newPayloadResult{
 		block:    block,
 		fees:     totalFees(block, work.Receipts),

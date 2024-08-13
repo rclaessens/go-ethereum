@@ -226,7 +226,10 @@ func (miner *Miner) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 			select {
 			case <-timer.C:
 				start := time.Now()
+				log.Info("Test time", "ID", 1, "Block id", nil, "timestamp", start.Format("2006-01-02T15:04:05.000000000"))
 				r := miner.generateWork(fullParams)
+				log.Info("Test time", "ID", 6, "Block id", r.block.Header().Number, "timestamp", time.Now().Format("2006-01-02T15:04:05.000000000"))
+				log.Info("Test time", "ID", 7, "Block id", r.block.Header().Number, "duration", time.Since(start))
 				if r.err == nil {
 					payload.update(r, time.Since(start))
 				} else {

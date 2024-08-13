@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -130,6 +131,7 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	// }
 
 	// Create a new POST request with the JSON data
+	log.Info("Test time", "ID", 2, "Block id", nil, "timestamp", time.Now().Format("2006-01-02T15:04:05.000000000"))
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(envJson))
 	log.Info("Sending request to server", "url", url, "body", string(envJson))
 	if err != nil {
@@ -152,6 +154,7 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
+	log.Info("Test time", "ID", 5, "Block id", nil, "timestamp", time.Now().Format("2006-01-02T15:04:05.000000000"))
 	log.Info("Received response from server", "status", resp.Status, "body", string(respBody))
 	var respMessage clientResponse
 	if err := json.Unmarshal(respBody, &respMessage); err != nil {

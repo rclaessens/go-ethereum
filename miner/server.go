@@ -42,6 +42,7 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	log.Info("Test time", "ID", 3, "Block id", nil, "timestamp", time.Now().Format("2006-01-02T15:04:05.000000000"))
 	log.Info("Received request from client")
 
 	body, err := io.ReadAll(r.Body)
@@ -82,6 +83,7 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 
 	// Send back the updated payload
 	w.Header().Set("Content-Type", "application/json")
+	log.Info("Test time", "ID", 4, "Block id", nil, "timestamp", time.Now().Format("2006-01-02T15:04:05.000000000"))
 	if err := json.NewEncoder(w).Encode(clientResponse); err != nil {
 		http.Error(w, "Error encoding response JSON", http.StatusInternalServerError)
 		return
