@@ -170,16 +170,24 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 		stateModifications = append(stateModifications, sm)
 	}
 
+	miner.pendingMu.Lock()
+    defer miner.pendingMu.Unlock()
+
 	// var receipts []*types.Receipt
 	for _, sm := range stateModifications {
-		pre := sm.Pre
-		post := sm.Post
-		updates := comparePrePostStates(pre, post)
-		env.State = miner.updateState(updates, env.State)
-		env.Txs = append(env.Txs, sm.Tx)
-		env.Tcount++
-		env.Receipts = append(env.Receipts, sm.Receipt)
-		env.Header.GasUsed += sm.Receipt.GasUsed
+		if sm.Receipt == nil {
+			log.Error("Receipt is nil for transaction", "tx", sm.Tx)
+			
+		} else {
+			pre := sm.Pre
+			post := sm.Post
+			updates := comparePrePostStates(pre, post)
+			env.State = miner.updateState(updates, env.State)
+			env.Txs = append(env.Txs, sm.Tx)
+			env.Tcount++
+			env.Receipts = append(env.Receipts, sm.Receipt)
+			env.Header.GasUsed += sm.Receipt.GasUsed
+		}
 		// for addr, acc := range updates {
 		// 	log.Info("Address", "address", addr.Hex())
 		// 	if acc.Balance != nil {
