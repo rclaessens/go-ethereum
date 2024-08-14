@@ -21,6 +21,7 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -56,6 +57,7 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/naoina/toml"
 	"github.com/urfave/cli/v2"
+	"github.com/edgelesssys/ego/enclave"
 )
 
 var (
@@ -273,8 +275,14 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 func httpsListener(miner *miner.Miner) {
 
 	cert, priv := createCertificate()
+	hash := sha256.Sum256(cert)
+	report, err := enclave.GetRemoteReport(hash[:])
+	if err != nil {
+		fmt.Println(err)
+	}
 
 	http.HandleFunc("/cert", func(w http.ResponseWriter, r *http.Request) { w.Write(cert) })
+	http.HandleFunc("/report", func(w http.ResponseWriter, r *http.Request) { w.Write(report) })
     http.HandleFunc("/", miner.Handler) // Use Miner's handler method
 
 	tlsCfg := tls.Config{

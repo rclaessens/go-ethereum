@@ -2,8 +2,10 @@ package miner
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,6 +20,9 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/holiman/uint256"
+	"github.com/edgelesssys/ego/attestation"
+	"github.com/edgelesssys/ego/attestation/tcbstatus"
+	"github.com/edgelesssys/ego/eclient"
 )
 
 type stateMap = map[common.Address]*account
@@ -56,26 +61,36 @@ type stateModification struct {
 	Receipt *types.Receipt `json:"receipt"`
 } 
 
-// func createTLSConfig(signer []byte) (*tls.Config, error) {
-// 	verifyReport := func(report attestation.Report) error {
-		
-// 		if report.SecurityVersion < 2 {
-// 			return errors.New("invalid security version")
-// 		}
-// 		if binary.LittleEndian.Uint16(report.ProductID) != 1234 {
-// 			return errors.New("invalid product")
-// 		}
-// 		if !bytes.Equal(report.SignerID, signer) {
-// 			return errors.New("invalid signer")
-// 		}
-// 		// Add verifications
-// 		return nil
-// 	}
+func verifyReport(reportBytes, certBytes, signer []byte) error {
+	report, err := eclient.VerifyRemoteReport(reportBytes)
+	if err == attestation.ErrTCBLevelInvalid {
+		log.Warn("Warning: TCB level is invalid", "status", report.TCBStatus, "explanation", tcbstatus.Explain(report.TCBStatus))
+		log.Info("Ignoring TCB level issue, because in development mode")
+	} else if err != nil {
+		return err
+	}
 
-// 	// Create a TLS config that verifies a certificate with embedded report.
-// 	tlsConfig := eclient.CreateAttestationClientTLSConfig(verifyReport)
-// 	return tlsConfig, nil
-// }
+	hash := sha256.Sum256(certBytes)
+	if !bytes.Equal(report.Data[:len(hash)], hash[:]) {
+		return errors.New("report data does not match the certificate's hash")
+	}
+
+	// You can either verify the UniqueID or the tuple (SignerID, ProductID, SecurityVersion, Debug).
+
+	if report.SecurityVersion < 2 {
+		return errors.New("invalid security version")
+	}
+	if binary.LittleEndian.Uint16(report.ProductID) != 1234 {
+		return errors.New("invalid product")
+	}
+	if !bytes.Equal(report.SignerID, signer) {
+		return errors.New("invalid signer")
+	}
+
+	// For production, you must also verify that report.Debug == false
+
+	return nil
+}
 
 // encodeEnvironmentToJson converts the Environment struct to a JSON string.
 func encodeEnvironmentToJson(transactions []*types.Transaction, env *Environment) ([]byte, error) {
@@ -158,26 +173,6 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	// URL of the server endpoint
 	url := "https://localhost:8080"
 
-	// Create a new HTTP client with default settings
-
-	// dummySignerID := "dummysignerid1234567890abcdef"
-	// signer, _ := hex.DecodeString(dummySignerID)
-
-
-	// // Create a TLS config for secure communication
-	// tlsConfig, err := createTLSConfig(signer)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// // Create a new HTTP client with the TLS configuration
-	// client := &http.Client{
-	// 	Transport: &http.Transport{
-	// 		TLSClientConfig: tlsConfig,
-	// 	},
-	// 	Timeout: 10 * time.Second, // Set an appropriate timeout
-	// }
-
 	// Create a new POST request with the JSON data
 	log.Info("Test time", "ID", 2, "Block id", nil, "timestamp", time.Now().Format("2006-01-02T15:04:05.000000000"))
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(envJson))
@@ -246,21 +241,6 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 			updates := comparePrePostStates(pre, post)
 			env.State = miner.updateState(updates, env.State)
 		}
-		// for addr, acc := range updates {
-		// 	log.Info("Address", "address", addr.Hex())
-		// 	if acc.Balance != nil {
-		// 		log.Info("  Balance", "balance", acc.Balance.String())
-		// 	}
-		// 	if acc.Nonce != 0 {
-		// 		log.Info("  Nonce", "nonce", acc.Nonce)
-		// 	}
-		// 	if acc.Code != nil {
-		// 		log.Info("  Code", "code", acc.Code)
-		// 	}
-		// 	if acc.Storage != nil {
-		// 		log.Info("  Storage", "storage", acc.Storage)
-		// 	}
-		// }
 	}
 
 	log.Info("Updated state successfully")	
