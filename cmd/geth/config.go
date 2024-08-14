@@ -18,13 +18,21 @@ package main
 
 import (
 	"bufio"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"os"
 	"reflect"
 	"runtime"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/ethereum/go-ethereum/accounts"
@@ -188,7 +196,7 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 	} else {
 		if ctx.Bool(utils.ServerModeFlag.Name) {
 			log.Info("Starting in server mode")
-			go httpListener(eth.Miner())
+			go httpsListener(eth.Miner())
 			eth.Miner().SetServerMode(true)
 			eth.Miner().SetClientMode(false)
 		} else if ctx.Bool(utils.ClientModeFlag.Name) {
@@ -262,14 +270,46 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 	return stack
 }
 
-func httpListener(miner *miner.Miner) {
+func httpsListener(miner *miner.Miner) {
+
+	cert, priv := createCertificate()
+
+	http.HandleFunc("/cert", func(w http.ResponseWriter, r *http.Request) { w.Write(cert) })
     http.HandleFunc("/", miner.Handler) // Use Miner's handler method
 
-    log.Info("HTTP server started")
-    if err := http.ListenAndServe(":8080", nil); err != nil {
-        log.Error("HTTP server failed to start", "error", err)
-    }
+	tlsCfg := tls.Config{
+		Certificates: []tls.Certificate{
+			{
+				Certificate: [][]byte{cert},
+				PrivateKey:  priv,
+			},
+		},
+	}
+
+	server := http.Server{
+		Addr:      "0.0.0.0:8080",
+		TLSConfig: &tlsCfg,
+	}
+
+    log.Info("HTTPS server started")
+	if err := server.ListenAndServeTLS("", ""); err != nil {
+		log.Error("HTTPS server failed to start", "error", err)
+	}
 }
+
+// createCertificate generates a self-signed certificate
+func createCertificate() ([]byte, crypto.PrivateKey) {
+	template := &x509.Certificate{
+		SerialNumber: &big.Int{},
+		Subject:      pkix.Name{CommonName: "localhost"},
+		NotAfter:     time.Now().Add(time.Hour),
+		DNSNames:     []string{"localhost"},
+	}
+	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
+	cert, _ := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
+	return cert, priv
+}
+
 
 // dumpConfig is the dumpconfig command.
 func dumpConfig(ctx *cli.Context) error {

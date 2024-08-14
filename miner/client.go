@@ -2,6 +2,8 @@ package miner
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io"
@@ -106,11 +108,57 @@ func encodeEnvironmentToJson(transactions []*types.Transaction, env *Environment
 // tlsCallToServer makes a secure HTTP call to the server, sending the JSON-encoded Environment
 // and returns the JSON response from the server.
 func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, error) {
+
+	// Retrieve the server's certificate from the /cert endpoint
+	certURL := "https://localhost:8080/cert"
+	// Create an HTTP client with a transport that ignores certificate verification for the initial request
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	resp, err := client.Get(certURL)
+	if err != nil {
+		log.Error("Failed to fetch certificate", "err", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read the certificate into memory
+	certBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Error("Failed to read certificate", "err", err)
+		return nil, err
+	}
+
+	log.Info("Received certificate from server", "cert", string(certBytes))
+
+	// Parse the certificate from the bytes
+	cert, err := x509.ParseCertificate(certBytes)
+	if err != nil {
+		log.Error("Failed to parse certificate", "err", err)
+		return nil, err
+	}
+
+	// Configure TLS settings to use the server's certificate and skip verification
+	tlsConfig := &tls.Config{
+		RootCAs:            x509.NewCertPool(),
+		InsecureSkipVerify: true, // Skip verification because the certificate is self-signed
+	}
+	tlsConfig.RootCAs.AddCert(cert)
+
+	// Create an HTTPS client with the configured TLS settings
+	client = &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+	}
+
 	// URL of the server endpoint
-	url := "http://localhost:8080"
+	url := "https://localhost:8080"
 
 	// Create a new HTTP client with default settings
-	client := &http.Client{}
 
 	// dummySignerID := "dummysignerid1234567890abcdef"
 	// signer, _ := hex.DecodeString(dummySignerID)
@@ -146,7 +194,7 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	MarkMinerEgress(int64(len(envJson)))
 
 	// Execute the HTTP request
-	resp, err := client.Do(req)
+	resp, err = client.Do(req)
 	if err != nil {
 		return nil, err
 	}
