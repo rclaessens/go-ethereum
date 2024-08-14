@@ -1,6 +1,7 @@
 package miner
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -51,6 +52,7 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
 		return
 	}
+	MarkMinerIngress(int64(len(body)))
 	transactions, env, err := decodeFromJSON(body)
 	if err != nil {
 		log.Error("Failed to decode JSON", "err", err)
@@ -84,10 +86,21 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 	// Send back the updated payload
 	w.Header().Set("Content-Type", "application/json")
 	log.Info("Test time", "ID", 4, "Block id", nil, "timestamp", time.Now().Format("2006-01-02T15:04:05.000000000"))
-	if err := json.NewEncoder(w).Encode(clientResponse); err != nil {
+	var responseBuffer bytes.Buffer
+	if err := json.NewEncoder(&responseBuffer).Encode(clientResponse); err != nil {
 		http.Error(w, "Error encoding response JSON", http.StatusInternalServerError)
 		return
 	}
+
+	// Write the response to the client
+	n, err := w.Write(responseBuffer.Bytes())
+	if err != nil {
+		http.Error(w, "Error sending response", http.StatusInternalServerError)
+		return
+	}
+
+	// Mark the egress meter with the number of bytes sent
+	MarkMinerEgress(int64(n))
 }
 
 func (miner *Miner) processTransactions (tx []*types.Transaction, env *Environment) ([]json.RawMessage, *Environment, error) {

@@ -142,6 +142,9 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	// Set the appropriate HTTP headers for JSON content
 	req.Header.Set("Content-Type", "application/json")
 
+	log.Info("Len JSON", "len", len(envJson))	
+	MarkMinerEgress(int64(len(envJson)))
+
 	// Execute the HTTP request
 	resp, err := client.Do(req)
 	if err != nil {
@@ -154,6 +157,7 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
+	MarkMinerIngress(int64(len(respBody)))
 	log.Info("Test time", "ID", 5, "Block id", nil, "timestamp", time.Now().Format("2006-01-02T15:04:05.000000000"))
 	log.Info("Received response from server", "status", resp.Status, "body", string(respBody))
 	var respMessage clientResponse
@@ -176,17 +180,23 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	// var receipts []*types.Receipt
 	for _, sm := range stateModifications {
 		if sm.Receipt == nil {
-			log.Error("Receipt is nil for transaction", "tx", sm.Tx)
-			
+			log.Error("Receipt is nil for transaction", "tx", sm.Tx)	
 		} else {
+			env.Header.GasUsed += sm.Receipt.GasUsed
+			if env.Header.GasUsed > env.Header.GasLimit {
+				log.Warn("Gas limit exceeded; excluding transaction", "tx", sm.Tx, "gasUsed", env.Header.GasUsed, "gasLimit", env.Header.GasLimit)
+				// Remove gas used
+				env.Header.GasUsed -= sm.Receipt.GasUsed
+				continue
+			}
+			env.Txs = append(env.Txs, sm.Tx)
+			env.Tcount++
+			env.Receipts = append(env.Receipts, sm.Receipt)
+			
 			pre := sm.Pre
 			post := sm.Post
 			updates := comparePrePostStates(pre, post)
 			env.State = miner.updateState(updates, env.State)
-			env.Txs = append(env.Txs, sm.Tx)
-			env.Tcount++
-			env.Receipts = append(env.Receipts, sm.Receipt)
-			env.Header.GasUsed += sm.Receipt.GasUsed
 		}
 		// for addr, acc := range updates {
 		// 	log.Info("Address", "address", addr.Hex())
