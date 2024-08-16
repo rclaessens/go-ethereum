@@ -110,7 +110,7 @@ func encodeEnvironmentToJson(transactions []*types.Transaction, env *Environment
 func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, error) {
 
 	// Retrieve the server's certificate from the /cert endpoint
-	certURL := "https://localhost:8080/cert"
+	certURL := "https://localhost:443/cert"
 	// Create an HTTP client with a transport that ignores certificate verification for the initial request
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -156,7 +156,7 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	}
 
 	// URL of the server endpoint
-	url := "https://localhost:8080"
+	url := "https://localhost:443"
 
 	// Create a new HTTP client with default settings
 

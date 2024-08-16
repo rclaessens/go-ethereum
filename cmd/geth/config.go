@@ -287,7 +287,7 @@ func httpsListener(miner *miner.Miner) {
 	}
 
 	server := http.Server{
-		Addr:      "0.0.0.0:8080",
+		Addr:      "0.0.0.0:443",
 		TLSConfig: &tlsCfg,
 	}
 

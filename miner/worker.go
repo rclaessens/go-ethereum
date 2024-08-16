@@ -421,6 +421,7 @@ func (miner *Miner) commitTransactions(env *Environment, plainTxs, blobTxs *tran
 // fillTransactions retrieves the pending transactions from the txpool and fills them
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
+// In client mode, the transactions are sent to the server for validation.
 func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *Environment) (error) {
 	miner.confMu.RLock()
 	tip := miner.config.GasPrice
@@ -450,7 +451,7 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *Environment) 
 		// Combine all transactions
 		allTxs := append(plainTxs, blobTxs...)
 
-		// Send all transactions to the client
+		// Send all transactions to the server
 		JSONtx, err := encodeEnvironmentToJson(allTxs, env)
 		if err != nil {
 			return err
