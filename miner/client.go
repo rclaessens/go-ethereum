@@ -110,7 +110,7 @@ func encodeEnvironmentToJson(transactions []*types.Transaction, env *Environment
 func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, error) {
 
 	// Retrieve the server's certificate from the /cert endpoint
-	certURL := "https://localhost:443/cert"
+	certURL := "https://localhost:8080/cert"
 	// Create an HTTP client with a transport that ignores certificate verification for the initial request
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -156,7 +156,7 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	}
 
 	// URL of the server endpoint
-	url := "https://localhost:443"
+	url := "https://localhost:8080"
 
 	// Create a new HTTP client with default settings
 
@@ -208,18 +208,11 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	MarkMinerIngress(int64(len(respBody)))
 	log.Info("Test time", "ID", 5, "Block id", nil, "timestamp", time.Now().Format("2006-01-02T15:04:05.000000000"))
 	log.Info("Received response from server", "status", resp.Status, "body", string(respBody))
-	var respMessage clientResponse
-	if err := json.Unmarshal(respBody, &respMessage); err != nil {
-		log.Error("Failed to decode JSON response: %v", err)
-	}
-
+	// Unmarshal the response directly into a slice of stateModifications
 	var stateModifications []stateModification
-	for _, stateModif := range respMessage.Results {
-		var sm stateModification
-		if err := json.Unmarshal(stateModif, &sm); err != nil {
-			log.Error("Failed to decode state modification: %v", err)
-		}
-		stateModifications = append(stateModifications, sm)
+	if err := json.Unmarshal(respBody, &stateModifications); err != nil {
+    	log.Error("Failed to decode state modifications: %v", err)
+    	return nil, err
 	}
 
 	miner.pendingMu.Lock()

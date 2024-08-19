@@ -20,11 +20,6 @@ type clientData struct {
 	Env 		*Environment          `json:"env"`
 }
 
-type clientResponse struct{
-	Results []json.RawMessage `json:"results"`
-	Env    *Environment      `json:"env"`
-}
-
 func decodeFromJSON (jsonData []byte) ([]*types.Transaction, *Environment, error){
 	log.Info("Received JSON data", "data", string(jsonData))
 	var clientData clientData
@@ -74,20 +69,12 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 	}
 	
 	log.Info("Processed transactions successfully")
-	clientEnv := &Environment{
-		Coinbase: env.Coinbase,
-		Header:   env.Header,
-	}
-	clientResponse := clientResponse{
-		Results: stateModifications,
-		Env:     clientEnv,
-	}
 
 	// Send back the updated payload
 	w.Header().Set("Content-Type", "application/json")
 	log.Info("Test time", "ID", 4, "Block id", nil, "timestamp", time.Now().Format("2006-01-02T15:04:05.000000000"))
 	var responseBuffer bytes.Buffer
-	if err := json.NewEncoder(&responseBuffer).Encode(clientResponse); err != nil {
+	if err := json.NewEncoder(&responseBuffer).Encode(stateModifications); err != nil {
 		http.Error(w, "Error encoding response JSON", http.StatusInternalServerError)
 		return
 	}
