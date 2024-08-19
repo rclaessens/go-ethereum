@@ -443,6 +443,7 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *Environment) 
 	filter.OnlyPlainTxs, filter.OnlyBlobTxs = false, true
 	pendingBlobTxs := miner.txpool.Pending(filter)
 
+	// In client mode, send all transactions to the server for validation
 	if miner.clientMode {
 		// Convert LazyTransaction to Transaction
 		plainTxs := convertLazyToTransaction(pendingPlainTxs)
@@ -523,15 +524,6 @@ func signalToErr(signal int32) error {
 	}
 }
 
-// Compare the states at the given snapshots
-// func compareStates(initialRoot, finalRoot common.Hash) {
-//     if initialRoot != finalRoot {
-//         log.Info("States are different", "initialRoot", initialRoot, "finalRoot", finalRoot)
-//     } else {
-//         log.Info("States are identical", "root", initialRoot)
-//     }
-// }
-
 
 // Initialize the prestate tracer
 func initializePrestateTracer() (*tracers.Tracer, error) {
@@ -556,46 +548,3 @@ func convertLazyToTransaction(lazyTxs map[common.Address][]*txpool.LazyTransacti
 	}
 	return txs
 }
-
-//// Function to process transactions with tracing enabled
-//func (miner *Miner) processTransactionsAndTrace(work *Environment) error {
-//    // Initialize the prestate tracer
-//    tracer, err := initializePrestateTracer()
-//    if err != nil {
-//        return err
-//    }
-//
-//    // Attach the tracer to the VM context
-//    vmConfig := vm.Config{
-//        Tracer: tracer.Hooks,
-//    }
-//
-//    for _, tx := range work.Txs {
-//        // Process the transaction with the tracer
-//        receipt, err := applyTransactionWithTracing(work.State, tx, work.Header, vmConfig)
-//        if err != nil {
-//            return err
-//        }
-//        work.Receipts = append(work.Receipts, receipt)
-//    }
-//
-//    // Get the tracer result
-//    result, err := tracer.GetResult()
-//    if err != nil {
-//        return err
-//    }
-//
-//    log.Info("Tracer result: %+v", result)
-//
-//    return nil
-//}
-//
-//// Function to apply a transaction with tracing enabled
-//func applyTransactionWithTracing(stateDB *state.StateDB, tx *types.Transaction, header *types.Header, vmConfig vm.Config) (*types.Receipt, error) {
-//    // Simplified example of processing a transaction
-//    receipt, err := core.ApplyTransaction(stateDB, tx, header, vmConfig)
-//    if err != nil {
-//        return nil, err
-//    }
-//    return receipt, nil
-//}

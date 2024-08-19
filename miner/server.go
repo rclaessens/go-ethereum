@@ -20,6 +20,7 @@ type clientData struct {
 	Env 		*Environment          `json:"env"`
 }
 
+// decodeFromJSON decodes the JSON data into a slice of transactions and an Environment struct.
 func decodeFromJSON (jsonData []byte) ([]*types.Transaction, *Environment, error){
 	log.Info("Received JSON data", "data", string(jsonData))
 	var clientData clientData
@@ -33,25 +34,25 @@ func decodeFromJSON (jsonData []byte) ([]*types.Transaction, *Environment, error
 	return clientData.Transactions, clientData.Env, nil
 }
 
+// Handler is the HTTP handler for the SGX server.
 func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	log.Info("Test time", "ID", 3, "Block id", nil, "timestamp", time.Now().Format("2006-01-02T15:04:05.000000000"))
-	log.Info("Received request from client")
 
 	body, err := io.ReadAll(r.Body)
-	log.Info("Received request body", "body", string(body))
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
 		return
 	}
+	// Mark the ingress meter with the number of bytes received
 	MarkMinerIngress(int64(len(body)))
 	transactions, env, err := decodeFromJSON(body)
 	if err != nil {
 		log.Error("Failed to decode JSON", "err", err)
-		http.Error(w, "Failed to decode JSON", http.StatusBadRequest) // TO DO : because it fails
+		http.Error(w, "Failed to decode JSON", http.StatusBadRequest)
 		return
 	}
 	env.Signer = types.MakeSigner(miner.chainConfig, env.Header.Number, env.Header.Time)
@@ -67,8 +68,6 @@ func (miner *Miner) Handler (w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to process transactions", http.StatusInternalServerError)
 		return
 	}
-	
-	log.Info("Processed transactions successfully")
 
 	// Send back the updated payload
 	w.Header().Set("Content-Type", "application/json")
@@ -111,16 +110,16 @@ func (miner *Miner) processTransactions (tx []*types.Transaction, env *Environme
 	return result, env, nil
 }
 
+// convertTransactionToLazy converts a transaction to a LazyTransaction.
 func convertTransactionToLazy(tx *types.Transaction) *txpool.LazyTransaction {
-    // Create a new LazyTransaction
     lazyTx := &txpool.LazyTransaction{
         Tx:        tx,
         Hash:      tx.Hash(),
-        Time:      time.Now(), // Set the time as now or fetch from a relevant field if available
+        Time:      time.Now(),
         GasFeeCap: new(uint256.Int).SetUint64(tx.GasFeeCap().Uint64()),
         GasTipCap: new(uint256.Int).SetUint64(tx.GasTipCap().Uint64()),
         Gas:       tx.Gas(),
-        BlobGas:   0, // Set to 0 or a relevant value if available
+        BlobGas:   0,
     }
 	if(tx.Type() == types.BlobTxType){
 		lazyTx.BlobGas = tx.BlobGas()
@@ -129,6 +128,7 @@ func convertTransactionToLazy(tx *types.Transaction) *txpool.LazyTransaction {
     return lazyTx
 }
 
+// convertTransactionsToLazy converts a slice of transactions to a slice of LazyTransactions.
 func convertTransactionsToLazy(txs []*types.Transaction) []*txpool.LazyTransaction {
     var lazyTxs []*txpool.LazyTransaction
     for _, tx := range txs {
@@ -138,6 +138,7 @@ func convertTransactionsToLazy(txs []*types.Transaction) []*txpool.LazyTransacti
     return lazyTxs
 }
 
+// convertToAddressMap groups the transactions by sender address.
 func convertToAddressMap(transactions []*txpool.LazyTransaction, signer types.Signer) map[common.Address][]*txpool.LazyTransaction {
     // Initialize the map to hold the transactions grouped by sender address
     addressMap := make(map[common.Address][]*txpool.LazyTransaction)
@@ -148,15 +149,12 @@ func convertToAddressMap(transactions []*txpool.LazyTransaction, signer types.Si
             log.Error("LazyTransaction has nil Tx", "lazyTx", lazyTx)
             continue
         }
-
         // Retrieve the sender address from the transaction
         sender, err := types.Sender(signer, lazyTx.Tx)
         if err != nil {
             log.Error("Failed to retrieve sender address", "err", err)
             continue
         }
-
-        // Append the transaction to the appropriate slice in the map
         addressMap[sender] = append(addressMap[sender], lazyTx)
     }
 

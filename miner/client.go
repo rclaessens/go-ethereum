@@ -56,27 +56,6 @@ type stateModification struct {
 	Receipt *types.Receipt `json:"receipt"`
 } 
 
-// func createTLSConfig(signer []byte) (*tls.Config, error) {
-// 	verifyReport := func(report attestation.Report) error {
-		
-// 		if report.SecurityVersion < 2 {
-// 			return errors.New("invalid security version")
-// 		}
-// 		if binary.LittleEndian.Uint16(report.ProductID) != 1234 {
-// 			return errors.New("invalid product")
-// 		}
-// 		if !bytes.Equal(report.SignerID, signer) {
-// 			return errors.New("invalid signer")
-// 		}
-// 		// Add verifications
-// 		return nil
-// 	}
-
-// 	// Create a TLS config that verifies a certificate with embedded report.
-// 	tlsConfig := eclient.CreateAttestationClientTLSConfig(verifyReport)
-// 	return tlsConfig, nil
-// }
-
 // encodeEnvironmentToJson converts the Environment struct to a JSON string.
 func encodeEnvironmentToJson(transactions []*types.Transaction, env *Environment) ([]byte, error) {
 	if len(transactions) == 0 {
@@ -125,7 +104,6 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	}
 	defer resp.Body.Close()
 
-	// Read the certificate into memory
 	certBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Error("Failed to read certificate", "err", err)
@@ -158,26 +136,6 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	// URL of the server endpoint
 	url := "https://localhost:8080"
 
-	// Create a new HTTP client with default settings
-
-	// dummySignerID := "dummysignerid1234567890abcdef"
-	// signer, _ := hex.DecodeString(dummySignerID)
-
-
-	// // Create a TLS config for secure communication
-	// tlsConfig, err := createTLSConfig(signer)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// // Create a new HTTP client with the TLS configuration
-	// client := &http.Client{
-	// 	Transport: &http.Transport{
-	// 		TLSClientConfig: tlsConfig,
-	// 	},
-	// 	Timeout: 10 * time.Second, // Set an appropriate timeout
-	// }
-
 	// Create a new POST request with the JSON data
 	log.Info("Test time", "ID", 2, "Block id", nil, "timestamp", time.Now().Format("2006-01-02T15:04:05.000000000"))
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(envJson))
@@ -200,7 +158,7 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 	}
 	defer resp.Body.Close()
 
-	// Read the response body using io.ReadAll
+	// Read the response body
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
@@ -239,21 +197,6 @@ func (miner *Miner) tlsCallToServer(envJson []byte, env *Environment) ([]byte, e
 			updates := comparePrePostStates(pre, post)
 			env.State = miner.updateState(updates, env.State)
 		}
-		// for addr, acc := range updates {
-		// 	log.Info("Address", "address", addr.Hex())
-		// 	if acc.Balance != nil {
-		// 		log.Info("  Balance", "balance", acc.Balance.String())
-		// 	}
-		// 	if acc.Nonce != 0 {
-		// 		log.Info("  Nonce", "nonce", acc.Nonce)
-		// 	}
-		// 	if acc.Code != nil {
-		// 		log.Info("  Code", "code", acc.Code)
-		// 	}
-		// 	if acc.Storage != nil {
-		// 		log.Info("  Storage", "storage", acc.Storage)
-		// 	}
-		// }
 	}
 
 	log.Info("Updated state successfully")	
@@ -265,7 +208,6 @@ func comparePrePostStates(pre, post stateMap) map[common.Address]account {
 
 	for addr, postAccount := range post {
 		preAccount, exists := pre[addr]
-
 		// Initialize the account update entry if not already initialized
 		if _, exists := updates[addr]; !exists {
 			updates[addr] = account{
@@ -274,39 +216,32 @@ func comparePrePostStates(pre, post stateMap) map[common.Address]account {
 			}
 		}
 		updateAccount := updates[addr]
-
 		// If the account does not exist in the pre state, it has been created
 		if !exists {
 			updates[addr] = *postAccount
 			continue
 		}
-
 		// Check for balance changes
 		if postAccount.Balance.Cmp(&preAccount.Balance.Int) != 0 {
 			updateAccount.Balance = postAccount.Balance
 		}
-
 		// Check for nonce changes
 		if postAccount.Nonce != preAccount.Nonce {
 			updateAccount.Nonce = postAccount.Nonce
 		}
-
 		// Check for code changes
 		if !bytes.Equal(postAccount.Code, preAccount.Code) {
 			updateAccount.Code = postAccount.Code
 		}
-
 		// Check for storage changes
 		for key, postValue := range postAccount.Storage {
 			if preValue, exists := preAccount.Storage[key]; !exists || postValue != preValue {
 				updateAccount.Storage[key] = postValue
 			}
 		}
-
 		// Reassign the modified account back to the map
 		updates[addr] = updateAccount
 	}
-
 	// Check for account deletions
 	for addr := range pre {
 		if _, exists := post[addr]; !exists {

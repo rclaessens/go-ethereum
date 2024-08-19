@@ -191,6 +191,7 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 
 	backend, eth := utils.RegisterEthService(stack, &cfg.Eth)
 
+	// Start in server or client mode
 	if (ctx.Bool(utils.ServerModeFlag.Name) && ctx.Bool(utils.ClientModeFlag.Name)){
 		utils.Fatalf("Cannot run in both server and client mode")
 	} else {
@@ -270,6 +271,7 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 	return stack
 }
 
+// httpsListener starts an HTTPS server that listens for incoming requests
 func httpsListener(miner *miner.Miner) {
 
 	cert, priv := createCertificate()
